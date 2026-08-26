@@ -6,7 +6,7 @@
 - [x] Implement OpenAI research cards and deep reads.
 - [x] Expose ingest, search, and deep-read through CLI and FastAPI.
 - [x] Pass offline automated tests.
-- [ ] Pass a real PDF/OpenAI end-to-end test.
+- [x] Pass a real PDF/OpenAI end-to-end test.
 
 Future candidates such as semantic search, Zotero, browser UI, and knowledge graphs remain
 deferred until a concrete requirement justifies them.

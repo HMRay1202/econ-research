@@ -23,6 +23,16 @@ cp .env.example .env
 
 Add `OPENAI_API_KEY` to the local `.env`. The file is ignored by Git.
 
+The default model routing balances cost and research quality:
+
+- `gpt-5.6-luna` with low reasoning generates structured research cards.
+- `gpt-5.6-terra` with medium reasoning generates deep-reading reports.
+- `gpt-5.6-terra` is the fallback when an operation-specific model is blank.
+
+Override `OPENAI_DEFAULT_MODEL`, `OPENAI_CARD_MODEL`, `OPENAI_DEEP_READ_MODEL`, and their
+reasoning-effort settings in `.env` when needed. The legacy `OPENAI_MODEL` variable remains a
+fallback alias for `OPENAI_DEFAULT_MODEL`.
+
 ## Usage
 
 ```bash
@@ -50,4 +60,3 @@ pytest
 
 See [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [PROJECT_CHARTER.md](PROJECT_CHARTER.md).
-

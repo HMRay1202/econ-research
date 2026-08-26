@@ -15,13 +15,14 @@ class CardsEnvelope(BaseModel):
 
 
 class OpenAIResearchLLM:
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, reasoning_effort: str = "medium"):
         if not api_key:
             raise ValueError("OPENAI_API_KEY is required for LLM operations")
         from openai import OpenAI
 
         self._client = OpenAI(api_key=api_key)
         self._model = model
+        self._reasoning_effort = reasoning_effort
 
     def generate_cards(self, document: ParsedDocument) -> list[ResearchCardDraft]:
         source = render_document(
@@ -34,6 +35,7 @@ class OpenAIResearchLLM:
                 {"role": "user", "content": source},
             ],
             response_format=CardsEnvelope,
+            reasoning_effort=self._reasoning_effort,
         )
         message = completion.choices[0].message
         if message.refusal:
@@ -55,6 +57,7 @@ class OpenAIResearchLLM:
                 {"role": "system", "content": DEEP_READ_SYSTEM_PROMPT},
                 {"role": "user", "content": source + focus_instruction},
             ],
+            reasoning_effort=self._reasoning_effort,
         )
         report = completion.choices[0].message.content
         if not report:

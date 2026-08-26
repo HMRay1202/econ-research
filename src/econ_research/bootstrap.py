@@ -16,18 +16,28 @@ class LazyOpenAIResearchLLM:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    def _client(self) -> OpenAIResearchLLM:
+    def _client(self, model: str, reasoning_effort: str) -> OpenAIResearchLLM:
         if not self.settings.openai_api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY is not set. Copy .env.example to .env and add a local key."
             )
-        return OpenAIResearchLLM(self.settings.openai_api_key, self.settings.openai_model)
+        return OpenAIResearchLLM(
+            self.settings.openai_api_key,
+            model,
+            reasoning_effort=reasoning_effort,
+        )
 
     def generate_cards(self, document):
-        return self._client().generate_cards(document)
+        return self._client(
+            self.settings.effective_card_model,
+            self.settings.openai_card_reasoning_effort,
+        ).generate_cards(document)
 
     def deep_read(self, document, focus=None):
-        return self._client().deep_read(document, focus)
+        return self._client(
+            self.settings.effective_deep_read_model,
+            self.settings.openai_deep_read_reasoning_effort,
+        ).deep_read(document, focus)
 
 
 def build_service(settings: Settings | None = None) -> ResearchService:
@@ -41,4 +51,3 @@ def build_service(settings: Settings | None = None) -> ResearchService:
         parsed_dir=settings.parsed_dir,
         generated_dir=settings.generated_dir,
     )
-

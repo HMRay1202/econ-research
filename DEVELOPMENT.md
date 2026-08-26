@@ -7,6 +7,10 @@ Configuration is loaded from environment variables and an optional local `.env`.
 directories are created on demand. Never commit `.env`, databases, PDFs, parsed paper text, or
 generated reports.
 
+LLM routing is explicit: card generation defaults to `gpt-5.6-luna` with low reasoning, while
+deep reads default to `gpt-5.6-terra` with medium reasoning. `OPENAI_DEFAULT_MODEL` is the
+fallback for an operation-specific blank model; `OPENAI_MODEL` is accepted for compatibility.
+
 Run checks with:
 
 ```bash
