@@ -7,7 +7,15 @@ from uuid import uuid4
 
 from econ_research.db.repository import SQLiteRepository
 from econ_research.llm.base import ResearchLLM
-from econ_research.models import DeepReadResult, IngestResult, Paper, ParsedChunk, ParsedDocument
+from econ_research.llm.telemetry import LLMCallError, LLMResult
+from econ_research.models import (
+    DeepReadResult,
+    IngestResult,
+    Paper,
+    ParsedChunk,
+    ParsedDocument,
+    UsageReport,
+)
 from econ_research.parsing.base import Parser
 
 
@@ -73,7 +81,18 @@ class ResearchService:
         try:
             document = self.parser.parse(pdf_path)
             markdown_path.write_text(document.markdown, encoding="utf-8")
-            cards = self.llm.generate_cards(document)
+            try:
+                generated_cards = self.llm.generate_cards(document)
+            except LLMCallError as exc:
+                self.repository.save_llm_call(paper_id, "generate_cards", exc.metrics)
+                raise
+            if isinstance(generated_cards, LLMResult):
+                self.repository.save_llm_call(
+                    paper_id, "generate_cards", generated_cards.metrics
+                )
+                cards = generated_cards.value
+            else:  # Test doubles and custom local backends may omit telemetry.
+                cards = generated_cards
             valid_ordinals = {chunk.ordinal for chunk in document.chunks}
             invalid_ordinals = {
                 card.chunk_ordinal
@@ -118,7 +137,16 @@ class ResearchService:
                 for chunk in chunks
             ],
         )
-        report = self.llm.deep_read(document, focus)
+        try:
+            generated_report = self.llm.deep_read(document, focus)
+        except LLMCallError as exc:
+            self.repository.save_llm_call(paper_id, "deep_read", exc.metrics)
+            raise
+        if isinstance(generated_report, LLMResult):
+            self.repository.save_llm_call(paper_id, "deep_read", generated_report.metrics)
+            report = generated_report.value
+        else:  # Test doubles and custom local backends may omit telemetry.
+            report = generated_report
         result = self.repository.save_deep_read(paper_id, focus, report)
         report_path = self.generated_dir / f"deep-read-{result.id}.md"
         report_path.write_text(report, encoding="utf-8")
@@ -132,6 +160,23 @@ class ResearchService:
 
     def list_papers(self) -> list[Paper]:
         return self.repository.list_papers()
+
+    def usage(
+        self,
+        *,
+        paper_id: str | None = None,
+        operation: str | None = None,
+        since: str | None = None,
+        include_calls: bool = False,
+    ) -> UsageReport:
+        if operation not in (None, "generate_cards", "deep_read"):
+            raise ValueError("operation must be generate_cards or deep_read")
+        return self.repository.usage_report(
+            paper_id=paper_id,
+            operation=operation,
+            since=since,
+            include_calls=include_calls,
+        )
 
     @staticmethod
     def _validate_pdf(path: Path) -> None:

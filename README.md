@@ -9,6 +9,7 @@ searchable source passages, and paper-specific deep-reading reports.
 - Parse PDFs to normalized Markdown with Docling.
 - Generate economics-specific research cards with the OpenAI API.
 - Store papers, chunks, cards, and deep reads in SQLite.
+- Record per-call LLM token usage, latency, status, and price-snapshot cost estimates.
 - Search papers, cards, and source passages with SQLite FTS5.
 - Use the same application service from Typer CLI and FastAPI.
 
@@ -40,10 +41,13 @@ research ingest /path/to/paper.pdf
 research search "parallel trends"
 research deep-read PAPER_ID
 research deep-read PAPER_ID --focus identification
+research usage
+research usage --paper-id PAPER_ID --details
 research serve
 ```
 
-The API documentation is available at `http://127.0.0.1:8000/docs` while the server runs.
+The API documentation is available at `http://127.0.0.1:8000/docs` while the server runs. Usage
+statistics are also available from `GET /api/usage` and `GET /api/papers/{paper_id}/usage`.
 
 ## Data and privacy
 
@@ -54,8 +58,8 @@ continues to work without Codex after installation.
 ## Development
 
 ```bash
-ruff check .
-pytest
+conda run -n econ-research ruff check .
+conda run -n econ-research pytest
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and

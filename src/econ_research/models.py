@@ -109,3 +109,51 @@ class DeepReadResult(BaseModel):
     report: str
     created_at: str
 
+
+class LLMCallMetrics(BaseModel):
+    provider_request_id: str | None = None
+    model: str
+    reasoning_effort: str
+    input_tokens: int = Field(default=0, ge=0)
+    cached_input_tokens: int = Field(default=0, ge=0)
+    cache_write_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    input_price_per_million: float | None = None
+    cached_input_price_per_million: float | None = None
+    cache_write_price_per_million: float | None = None
+    output_price_per_million: float | None = None
+    estimated_cost_usd: float | None = None
+    duration_ms: int = Field(ge=0)
+    status: Literal["succeeded", "failed"]
+    error: str | None = None
+    started_at: str
+    completed_at: str
+
+
+class LLMCall(LLMCallMetrics):
+    id: str
+    paper_id: str
+    operation: Literal["generate_cards", "deep_read"]
+
+
+class UsageSummary(BaseModel):
+    call_count: int = 0
+    succeeded_count: int = 0
+    failed_count: int = 0
+    unpriced_count: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    cache_write_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    total_tokens: int = 0
+    total_duration_ms: int = 0
+    average_duration_ms: float = 0
+    estimated_cost_usd: float = 0
+
+
+class UsageReport(BaseModel):
+    summary: UsageSummary
+    calls: list[LLMCall] | None = None

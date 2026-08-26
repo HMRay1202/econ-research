@@ -7,6 +7,13 @@ from econ_research.llm.prompts import (
     DEEP_READ_SYSTEM_PROMPT,
     render_document,
 )
+from econ_research.llm.telemetry import (
+    CardGenerationResult,
+    DeepReadGenerationResult,
+    LLMCallError,
+    TimedCall,
+    build_metrics,
+)
 from econ_research.models import ParsedDocument, ResearchCardDraft
 
 
@@ -24,42 +31,80 @@ class OpenAIResearchLLM:
         self._model = model
         self._reasoning_effort = reasoning_effort
 
-    def generate_cards(self, document: ParsedDocument) -> list[ResearchCardDraft]:
+    def generate_cards(self, document: ParsedDocument) -> CardGenerationResult:
         source = render_document(
             document.title, [chunk.model_dump() for chunk in document.chunks]
         )
-        completion = self._client.beta.chat.completions.parse(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": CARD_SYSTEM_PROMPT},
-                {"role": "user", "content": source},
-            ],
-            response_format=CardsEnvelope,
-            reasoning_effort=self._reasoning_effort,
-        )
-        message = completion.choices[0].message
-        if message.refusal:
-            raise RuntimeError(f"The model refused card generation: {message.refusal}")
-        if message.parsed is None:
-            raise RuntimeError("The model returned no structured card output")
-        return message.parsed.cards
+        timer = TimedCall.start()
+        completion = None
+        try:
+            completion = self._client.beta.chat.completions.parse(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": CARD_SYSTEM_PROMPT},
+                    {"role": "user", "content": source},
+                ],
+                response_format=CardsEnvelope,
+                reasoning_effort=self._reasoning_effort,
+            )
+            message = completion.choices[0].message
+            if message.refusal:
+                raise RuntimeError(f"The model refused card generation: {message.refusal}")
+            if message.parsed is None:
+                raise RuntimeError("The model returned no structured card output")
+            metrics = build_metrics(
+                completion=completion,
+                model=self._model,
+                reasoning_effort=self._reasoning_effort,
+                timer=timer,
+            )
+            return CardGenerationResult(message.parsed.cards, metrics)
+        except Exception as exc:
+            metrics = build_metrics(
+                completion=completion,
+                model=self._model,
+                reasoning_effort=self._reasoning_effort,
+                timer=timer,
+                error=exc,
+            )
+            raise LLMCallError(str(exc), metrics) from exc
 
-    def deep_read(self, document: ParsedDocument, focus: str | None = None) -> str:
+    def deep_read(
+        self, document: ParsedDocument, focus: str | None = None
+    ) -> DeepReadGenerationResult:
         source = render_document(
             document.title, [chunk.model_dump() for chunk in document.chunks]
         )
         focus_instruction = (
             f"\n\nGive additional attention to this requested focus: {focus}" if focus else ""
         )
-        completion = self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": DEEP_READ_SYSTEM_PROMPT},
-                {"role": "user", "content": source + focus_instruction},
-            ],
-            reasoning_effort=self._reasoning_effort,
-        )
-        report = completion.choices[0].message.content
-        if not report:
-            raise RuntimeError("The model returned an empty deep-read report")
-        return report
+        timer = TimedCall.start()
+        completion = None
+        try:
+            completion = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": DEEP_READ_SYSTEM_PROMPT},
+                    {"role": "user", "content": source + focus_instruction},
+                ],
+                reasoning_effort=self._reasoning_effort,
+            )
+            report = completion.choices[0].message.content
+            if not report:
+                raise RuntimeError("The model returned an empty deep-read report")
+            metrics = build_metrics(
+                completion=completion,
+                model=self._model,
+                reasoning_effort=self._reasoning_effort,
+                timer=timer,
+            )
+            return DeepReadGenerationResult(report, metrics)
+        except Exception as exc:
+            metrics = build_metrics(
+                completion=completion,
+                model=self._model,
+                reasoning_effort=self._reasoning_effort,
+                timer=timer,
+                error=exc,
+            )
+            raise LLMCallError(str(exc), metrics) from exc

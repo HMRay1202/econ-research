@@ -6,6 +6,7 @@ from econ_research import bootstrap
 from econ_research.bootstrap import LazyOpenAIResearchLLM
 from econ_research.config import Settings
 from econ_research.llm.openai_client import CardsEnvelope, OpenAIResearchLLM
+from econ_research.llm.telemetry import LLMCallError
 from econ_research.models import ParsedChunk, ParsedDocument, ResearchCardDraft
 
 
@@ -76,12 +77,29 @@ def test_openai_client_sends_reasoning_effort_to_both_operations() -> None:
         def parse(self, **kwargs):
             calls.append(kwargs)
             message = SimpleNamespace(refusal=None, parsed=CardsEnvelope(cards=[card]))
-            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+            return fake_completion(message)
 
         def create(self, **kwargs):
             calls.append(kwargs)
             message = SimpleNamespace(content="# Deep read")
-            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+            return fake_completion(message)
+
+    def fake_completion(message):
+        usage = SimpleNamespace(
+            prompt_tokens=1000,
+            completion_tokens=200,
+            total_tokens=1200,
+            prompt_tokens_details=SimpleNamespace(
+                cached_tokens=100, cache_write_tokens=50
+            ),
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=30),
+        )
+        return SimpleNamespace(
+            id="chatcmpl-test",
+            model="gpt-5.6-terra",
+            usage=usage,
+            choices=[SimpleNamespace(message=message)],
+        )
 
     completions = FakeCompletions()
     llm = object.__new__(OpenAIResearchLLM)
@@ -92,7 +110,40 @@ def test_openai_client_sends_reasoning_effort_to_both_operations() -> None:
     llm._model = "gpt-5.6-terra"
     llm._reasoning_effort = "medium"
 
-    assert llm.generate_cards(sample_document()) == [card]
-    assert llm.deep_read(sample_document()) == "# Deep read"
+    cards = llm.generate_cards(sample_document())
+    deep_read = llm.deep_read(sample_document())
+
+    assert cards.value == [card]
+    assert deep_read.value == "# Deep read"
+    assert cards.metrics.provider_request_id == "chatcmpl-test"
+    assert cards.metrics.input_tokens == 1000
+    assert cards.metrics.cached_input_tokens == 100
+    assert cards.metrics.cache_write_tokens == 50
+    assert cards.metrics.output_tokens == 200
+    assert cards.metrics.reasoning_tokens == 30
+    assert cards.metrics.estimated_cost_usd == 0.004245
     assert [call["reasoning_effort"] for call in calls] == ["medium", "medium"]
     assert [call["model"] for call in calls] == ["gpt-5.6-terra", "gpt-5.6-terra"]
+
+
+def test_openai_client_marks_failure_without_usage_as_unpriced() -> None:
+    class FailingCompletions:
+        def create(self, **kwargs):
+            raise ConnectionError("network unavailable")
+
+    llm = object.__new__(OpenAIResearchLLM)
+    llm._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FailingCompletions())
+    )
+    llm._model = "gpt-5.6-terra"
+    llm._reasoning_effort = "medium"
+
+    try:
+        llm.deep_read(sample_document())
+    except LLMCallError as exc:
+        assert exc.metrics.status == "failed"
+        assert exc.metrics.total_tokens == 0
+        assert exc.metrics.estimated_cost_usd is None
+        assert "network unavailable" in (exc.metrics.error or "")
+    else:  # pragma: no cover
+        raise AssertionError("Expected LLMCallError")

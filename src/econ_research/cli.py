@@ -53,6 +53,31 @@ def deep_read_command(
     typer.echo(result.report)
 
 
+@app.command("usage")
+def usage_command(
+    paper_id: str | None = typer.Option(None, help="Limit results to one paper ID."),
+    operation: str | None = typer.Option(
+        None, help="Limit results to generate_cards or deep_read."
+    ),
+    since: str | None = typer.Option(
+        None, help="Only include calls started at or after this ISO-8601 timestamp."
+    ),
+    details: bool = typer.Option(False, help="Include every matching call record."),
+) -> None:
+    """Show measured LLM token, estimated cost, and latency totals."""
+    try:
+        report = build_service().usage(
+            paper_id=paper_id,
+            operation=operation,
+            since=since,
+            include_calls=details,
+        )
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(report.model_dump_json(indent=2))
+
+
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind host."),
@@ -67,4 +92,3 @@ def serve(
 
 if __name__ == "__main__":  # pragma: no cover
     app()
-

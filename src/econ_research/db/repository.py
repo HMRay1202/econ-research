@@ -11,10 +11,14 @@ from uuid import uuid4
 
 from econ_research.models import (
     DeepReadResult,
+    LLMCall,
+    LLMCallMetrics,
     Paper,
     ParsedDocument,
     ResearchCardDraft,
     SearchResult,
+    UsageReport,
+    UsageSummary,
 )
 
 
@@ -251,6 +255,96 @@ class SQLiteRepository:
                 (result.id, result.paper_id, result.focus, result.report, result.created_at),
             )
         return result
+
+    def save_llm_call(
+        self,
+        paper_id: str,
+        operation: str,
+        metrics: LLMCallMetrics,
+    ) -> LLMCall:
+        call = LLMCall(
+            id=str(uuid4()), paper_id=paper_id, operation=operation, **metrics.model_dump()
+        )
+        values = call.model_dump()
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO llm_calls (
+                       id, paper_id, operation, provider_request_id, model, reasoning_effort,
+                       input_tokens, cached_input_tokens, cache_write_tokens, output_tokens,
+                       reasoning_tokens, total_tokens, input_price_per_million,
+                       cached_input_price_per_million, cache_write_price_per_million,
+                       output_price_per_million, estimated_cost_usd, duration_ms, status, error,
+                       started_at, completed_at
+                   ) VALUES (
+                       :id, :paper_id, :operation, :provider_request_id, :model,
+                       :reasoning_effort, :input_tokens, :cached_input_tokens,
+                       :cache_write_tokens, :output_tokens, :reasoning_tokens, :total_tokens,
+                       :input_price_per_million, :cached_input_price_per_million,
+                       :cache_write_price_per_million, :output_price_per_million,
+                       :estimated_cost_usd, :duration_ms, :status, :error, :started_at,
+                       :completed_at
+                   )""",
+                values,
+            )
+        return call
+
+    def usage_report(
+        self,
+        *,
+        paper_id: str | None = None,
+        operation: str | None = None,
+        since: str | None = None,
+        include_calls: bool = False,
+    ) -> UsageReport:
+        clauses: list[str] = []
+        parameters: list[str] = []
+        if paper_id:
+            clauses.append("paper_id = ?")
+            parameters.append(paper_id)
+        if operation:
+            clauses.append("operation = ?")
+            parameters.append(operation)
+        if since:
+            clauses.append("started_at >= ?")
+            parameters.append(since)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self.connect() as connection:
+            row = connection.execute(
+                f"""SELECT
+                       COUNT(*) AS call_count,
+                       COALESCE(SUM(status = 'succeeded'), 0) AS succeeded_count,
+                       COALESCE(SUM(status = 'failed'), 0) AS failed_count,
+                       COALESCE(SUM(estimated_cost_usd IS NULL), 0) AS unpriced_count,
+                       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                       COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
+                       COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                       COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                       COALESCE(SUM(duration_ms), 0) AS total_duration_ms,
+                       COALESCE(AVG(duration_ms), 0) AS average_duration_ms,
+                       COALESCE(SUM(estimated_cost_usd), 0) AS estimated_cost_usd
+                   FROM llm_calls{where}""",
+                parameters,
+            ).fetchone()
+            rows = (
+                connection.execute(
+                    f"SELECT * FROM llm_calls{where} ORDER BY started_at DESC", parameters
+                ).fetchall()
+                if include_calls
+                else []
+            )
+        summary_values = dict(row)
+        summary_values["average_duration_ms"] = round(
+            float(summary_values["average_duration_ms"]), 2
+        )
+        summary_values["estimated_cost_usd"] = round(
+            float(summary_values["estimated_cost_usd"]), 8
+        )
+        return UsageReport(
+            summary=UsageSummary(**summary_values),
+            calls=[LLMCall(**dict(call_row)) for call_row in rows] if include_calls else None,
+        )
 
     @staticmethod
     def _paper_from_row(row: sqlite3.Row) -> Paper:

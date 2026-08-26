@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from econ_research.bootstrap import build_service
-from econ_research.models import DeepReadResult, IngestResult, Paper, SearchResult
+from econ_research.models import DeepReadResult, IngestResult, Paper, SearchResult, UsageReport
 from econ_research.service import PaperNotFoundError, ResearchService
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
@@ -79,6 +79,45 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
         limit: int = Query(default=20, ge=1, le=100),
     ) -> list[SearchResult]:
         return get_service(request).search(q, limit)
+
+    @application.get("/api/usage", response_model=UsageReport)
+    def usage(
+        request: Request,
+        paper_id: str | None = None,
+        operation: str | None = None,
+        since: str | None = None,
+        include_calls: bool = False,
+    ) -> UsageReport:
+        try:
+            return get_service(request).usage(
+                paper_id=paper_id,
+                operation=operation,
+                since=since,
+                include_calls=include_calls,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/usage", response_model=UsageReport)
+    def paper_usage(
+        request: Request,
+        paper_id: str,
+        operation: str | None = None,
+        since: str | None = None,
+        include_calls: bool = False,
+    ) -> UsageReport:
+        try:
+            get_service(request).get_paper(paper_id)
+            return get_service(request).usage(
+                paper_id=paper_id,
+                operation=operation,
+                since=since,
+                include_calls=include_calls,
+            )
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @application.post("/api/papers/{paper_id}/deep-read", response_model=DeepReadResult)
     async def deep_read(

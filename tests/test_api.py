@@ -30,6 +30,10 @@ def test_api_uses_shared_service(service: ResearchService, sample_pdf: Path) -> 
     assert deep_read.status_code == 200
     assert deep_read.json()["paper_id"] == paper_id
 
+    usage = client.get(f"/api/papers/{paper_id}/usage", params={"include_calls": True})
+    assert usage.status_code == 200
+    assert usage.json()["summary"]["call_count"] == 0
+
 
 def test_api_rejects_non_pdf_upload(service: ResearchService) -> None:
     client = TestClient(create_app(service))
