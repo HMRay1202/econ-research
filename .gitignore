@@ -1,0 +1,71 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+.envrc
+
+# Papers, research data, databases, and generated outputs
+*.pdf
+data/*
+!data/originals/
+!data/parsed/
+!data/generated/
+data/originals/*
+data/parsed/*
+data/generated/*
+!data/originals/.gitkeep
+!data/parsed/.gitkeep
+!data/generated/.gitkeep
+samples/*
+!samples/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+reports/
+outputs/
+*.jsonl
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+.venv/
+venv/
+
+# Conda and local tools
+.conda/
+conda-meta/
+.python-version
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Local agent/application metadata
+.codex/
+.agents/

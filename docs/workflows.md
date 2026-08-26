@@ -1,0 +1,18 @@
+# Workflows
+
+## Ingest
+
+Validate the PDF, hash it, reject or return an existing successful import, preserve a private
+copy, parse to Markdown/chunks, generate cards, and commit all database records in a single
+workflow. Failures mark the paper as failed with a diagnostic message.
+
+## Search
+
+Query the FTS5 index and return ranked paper, card, and source-passage results. Every result
+includes its paper ID and provenance where applicable.
+
+## Deep read
+
+Load only the selected paper and its stored source chunks, ask the LLM for an economics-specific
+analysis, save the derived report, and return it. Cross-paper context is not included.
+
