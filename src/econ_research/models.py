@@ -110,6 +110,40 @@ class DeepReadResult(BaseModel):
     created_at: str
 
 
+class DeepReadSummary(BaseModel):
+    id: str
+    paper_id: str
+    focus: str | None = None
+    preview: str
+    created_at: str
+
+
+class SourceChunk(BaseModel):
+    id: str
+    paper_id: str
+    ordinal: int = Field(ge=0)
+    text: str
+    section: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+
+
+class ResearchCard(BaseModel):
+    id: str
+    paper_id: str
+    chunk_id: str | None = None
+    chunk_ordinal: int | None = None
+    type: CardType
+    title: str
+    content: str
+    section: str | None = None
+    page_start: int | None = None
+    page_end: int | None = None
+    tags: list[str] = Field(default_factory=list)
+    claim_kind: ClaimKind
+    created_at: str
+
+
 class LLMCallMetrics(BaseModel):
     provider_request_id: str | None = None
     model: str

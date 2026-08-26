@@ -7,6 +7,8 @@
 - [x] Expose ingest, search, and deep-read through CLI and FastAPI.
 - [x] Pass offline automated tests.
 - [x] Pass a real PDF/OpenAI end-to-end test.
+- [x] Add a minimal local browser workspace and stable read/file APIs.
 
-Future candidates such as semantic search, Zotero, browser UI, and knowledge graphs remain
-deferred until a concrete requirement justifies them.
+Next candidates are card export/editing, cross-paper comparison, improved page provenance,
+semantic search, and Zotero integration. Knowledge graphs remain deferred until a concrete
+research workflow justifies their additional complexity.

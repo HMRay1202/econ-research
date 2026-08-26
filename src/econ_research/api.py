@@ -7,12 +7,30 @@ from typing import Annotated
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from starlette.responses import FileResponse
+from starlette.staticfiles import StaticFiles
 
 from econ_research.bootstrap import build_service
-from econ_research.models import DeepReadResult, IngestResult, Paper, SearchResult, UsageReport
-from econ_research.service import PaperNotFoundError, ResearchService
+from econ_research.models import (
+    CardType,
+    ClaimKind,
+    DeepReadResult,
+    DeepReadSummary,
+    IngestResult,
+    Paper,
+    ResearchCard,
+    SearchResult,
+    SourceChunk,
+    UsageReport,
+)
+from econ_research.service import (
+    DeepReadNotFoundError,
+    PaperNotFoundError,
+    ResearchService,
+)
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+WEB_DIR = Path(__file__).with_name("web")
 
 
 class DeepReadRequest(BaseModel):
@@ -22,6 +40,7 @@ class DeepReadRequest(BaseModel):
 def create_app(service: ResearchService | None = None) -> FastAPI:
     application = FastAPI(title="Econ Research API", version="0.1.0")
     application.state.research_service = service
+    application.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
     def get_service(request: Request) -> ResearchService:
         current = request.app.state.research_service
@@ -33,6 +52,10 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
     @application.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @application.get("/", include_in_schema=False)
+    def web_app() -> FileResponse:
+        return FileResponse(WEB_DIR / "index.html", media_type="text/html")
 
     @application.post("/api/papers", response_model=IngestResult)
     async def ingest_paper(
@@ -65,12 +88,110 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
     def list_papers(request: Request) -> list[Paper]:
         return get_service(request).list_papers()
 
+    @application.get("/api/cards", response_model=list[ResearchCard])
+    def list_cards(
+        request: Request,
+        paper_id: str | None = None,
+        card_type: Annotated[CardType | None, Query(alias="type")] = None,
+        claim_kind: ClaimKind | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    ) -> list[ResearchCard]:
+        try:
+            return get_service(request).list_cards(
+                paper_id=paper_id,
+                card_type=card_type,
+                claim_kind=claim_kind,
+                limit=limit,
+            )
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @application.get("/api/papers/{paper_id}", response_model=Paper)
     def get_paper(request: Request, paper_id: str) -> Paper:
         try:
             return get_service(request).get_paper(paper_id)
         except PaperNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/cards", response_model=list[ResearchCard])
+    def paper_cards(
+        request: Request,
+        paper_id: str,
+        card_type: Annotated[CardType | None, Query(alias="type")] = None,
+        claim_kind: ClaimKind | None = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    ) -> list[ResearchCard]:
+        try:
+            return get_service(request).list_cards(
+                paper_id=paper_id,
+                card_type=card_type,
+                claim_kind=claim_kind,
+                limit=limit,
+            )
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/chunks", response_model=list[SourceChunk])
+    def paper_chunks(request: Request, paper_id: str) -> list[SourceChunk]:
+        try:
+            return get_service(request).list_chunks(paper_id)
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get(
+        "/api/papers/{paper_id}/deep-reads", response_model=list[DeepReadSummary]
+    )
+    def paper_deep_reads(request: Request, paper_id: str) -> list[DeepReadSummary]:
+        try:
+            return get_service(request).list_deep_reads(paper_id)
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/deep-reads/{deep_read_id}", response_model=DeepReadResult)
+    def get_deep_read(request: Request, deep_read_id: str) -> DeepReadResult:
+        try:
+            return get_service(request).get_deep_read(deep_read_id)
+        except DeepReadNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/files/original")
+    def original_pdf(request: Request, paper_id: str) -> FileResponse:
+        try:
+            service = get_service(request)
+            paper = service.get_paper(paper_id)
+            path = service.original_pdf_path(paper_id)
+            return FileResponse(path, media_type="application/pdf", filename=paper.source_filename)
+        except (PaperNotFoundError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/files/parsed")
+    def parsed_markdown(request: Request, paper_id: str) -> FileResponse:
+        try:
+            service = get_service(request)
+            paper = service.get_paper(paper_id)
+            path = service.parsed_markdown_path(paper_id)
+            filename = f"{Path(paper.source_filename).stem}-parsed.md"
+            return FileResponse(path, media_type="text/markdown", filename=filename)
+        except (PaperNotFoundError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @application.get("/api/deep-reads/{deep_read_id}/download")
+    def download_deep_read(request: Request, deep_read_id: str) -> FileResponse:
+        try:
+            path = get_service(request).deep_read_path(deep_read_id)
+            return FileResponse(
+                path,
+                media_type="text/markdown",
+                filename=f"deep-read-{deep_read_id}.md",
+            )
+        except (DeepReadNotFoundError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @application.get("/api/search", response_model=list[SearchResult])
     def search(

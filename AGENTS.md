@@ -3,6 +3,10 @@
 - Work from the repository root: `/Users/minrui/Documents/Rutgers/Paper_Research`.
 - Keep Phase 1 small and follow `PROJECT_CHARTER.md`.
 - CLI and HTTP handlers must call the shared `ResearchService`.
+- The local web client must call documented `/api/*` routes. Never access SQLite, `.env`, runtime
+  paths, or an OpenAI key from browser code, and never mount the entire `data/` directory.
+- Keep public API changes additive. Update `docs/api-contracts.md` and frontend tests when a
+  browser-facing contract changes.
 - Preserve original PDFs; generated summaries never replace source material.
 - Keep LLM calls behind `ResearchLLM` and persistence behind the repository boundary.
 - Use the existing Conda environment `econ-research` with Python 3.11. Do not install into

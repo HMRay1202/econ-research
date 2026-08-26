@@ -34,7 +34,7 @@ research = "econ_research.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-econ_research = ["db/*.sql"]
+econ_research = ["db/*.sql", "web/*.html", "web/*.css", "web/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -46,4 +46,3 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-

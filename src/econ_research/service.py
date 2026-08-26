@@ -9,11 +9,16 @@ from econ_research.db.repository import SQLiteRepository
 from econ_research.llm.base import ResearchLLM
 from econ_research.llm.telemetry import LLMCallError, LLMResult
 from econ_research.models import (
+    CardType,
+    ClaimKind,
     DeepReadResult,
+    DeepReadSummary,
     IngestResult,
     Paper,
     ParsedChunk,
     ParsedDocument,
+    ResearchCard,
+    SourceChunk,
     UsageReport,
 )
 from econ_research.parsing.base import Parser
@@ -24,6 +29,10 @@ class PaperNotFoundError(LookupError):
 
 
 class DuplicateInProgressError(RuntimeError):
+    pass
+
+
+class DeepReadNotFoundError(LookupError):
     pass
 
 
@@ -161,6 +170,53 @@ class ResearchService:
     def list_papers(self) -> list[Paper]:
         return self.repository.list_papers()
 
+    def list_cards(
+        self,
+        *,
+        paper_id: str | None = None,
+        card_type: CardType | None = None,
+        claim_kind: ClaimKind | None = None,
+        limit: int = 200,
+    ) -> list[ResearchCard]:
+        if paper_id:
+            self.get_paper(paper_id)
+        return self.repository.list_cards(
+            paper_id=paper_id,
+            card_type=card_type,
+            claim_kind=claim_kind,
+            limit=limit,
+        )
+
+    def list_chunks(self, paper_id: str) -> list[SourceChunk]:
+        self.get_paper(paper_id)
+        return self.repository.list_source_chunks(paper_id)
+
+    def list_deep_reads(self, paper_id: str) -> list[DeepReadSummary]:
+        self.get_paper(paper_id)
+        return self.repository.list_deep_reads(paper_id)
+
+    def get_deep_read(self, deep_read_id: str) -> DeepReadResult:
+        result = self.repository.get_deep_read(deep_read_id)
+        if not result:
+            raise DeepReadNotFoundError(f"Deep read not found: {deep_read_id}")
+        return result
+
+    def original_pdf_path(self, paper_id: str) -> Path:
+        paper = self.get_paper(paper_id)
+        return self._managed_file(paper.pdf_path, self.originals_dir)
+
+    def parsed_markdown_path(self, paper_id: str) -> Path:
+        paper = self.get_paper(paper_id)
+        if not paper.markdown_path:
+            raise FileNotFoundError(f"Parsed document not available: {paper_id}")
+        return self._managed_file(paper.markdown_path, self.parsed_dir)
+
+    def deep_read_path(self, deep_read_id: str) -> Path:
+        self.get_deep_read(deep_read_id)
+        return self._managed_file(
+            str(self.generated_dir / f"deep-read-{deep_read_id}.md"), self.generated_dir
+        )
+
     def usage(
         self,
         *,
@@ -187,6 +243,16 @@ class ResearchService:
         with path.open("rb") as handle:
             if handle.read(5) != b"%PDF-":
                 raise ValueError("Input does not have a valid PDF header")
+
+    @staticmethod
+    def _managed_file(raw_path: str, root: Path) -> Path:
+        candidate = Path(raw_path).resolve()
+        managed_root = root.resolve()
+        if not candidate.is_relative_to(managed_root):
+            raise ValueError("Stored file path is outside the managed data directory")
+        if not candidate.is_file():
+            raise FileNotFoundError(f"Stored file not found: {candidate.name}")
+        return candidate
 
 
 def _sha256(path: Path) -> str:

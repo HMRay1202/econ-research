@@ -10,13 +10,18 @@ from pathlib import Path
 from uuid import uuid4
 
 from econ_research.models import (
+    CardType,
+    ClaimKind,
     DeepReadResult,
+    DeepReadSummary,
     LLMCall,
     LLMCallMetrics,
     Paper,
     ParsedDocument,
+    ResearchCard,
     ResearchCardDraft,
     SearchResult,
+    SourceChunk,
     UsageReport,
     UsageSummary,
 )
@@ -228,6 +233,44 @@ class SQLiteRepository:
             ).fetchone()
         return int(row["count"])
 
+    def list_cards(
+        self,
+        *,
+        paper_id: str | None = None,
+        card_type: CardType | None = None,
+        claim_kind: ClaimKind | None = None,
+        limit: int = 200,
+    ) -> list[ResearchCard]:
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if paper_id:
+            clauses.append("cards.paper_id = ?")
+            parameters.append(paper_id)
+        if card_type:
+            clauses.append("cards.type = ?")
+            parameters.append(card_type)
+        if claim_kind:
+            clauses.append("cards.claim_kind = ?")
+            parameters.append(claim_kind)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(limit)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"""SELECT cards.*, chunks.ordinal AS chunk_ordinal
+                    FROM cards LEFT JOIN chunks ON chunks.id = cards.chunk_id
+                    {where} ORDER BY cards.created_at DESC, cards.rowid LIMIT ?""",
+                parameters,
+            ).fetchall()
+        cards: list[ResearchCard] = []
+        for row in rows:
+            values = dict(row)
+            values["tags"] = json.loads(values.pop("tags_json"))
+            cards.append(ResearchCard(**values))
+        return cards
+
+    def list_source_chunks(self, paper_id: str) -> list[SourceChunk]:
+        return [SourceChunk(**chunk) for chunk in self.get_chunks(paper_id)]
+
     def search(self, query: str, limit: int = 20) -> list[SearchResult]:
         if not query.strip():
             return []
@@ -255,6 +298,25 @@ class SQLiteRepository:
                 (result.id, result.paper_id, result.focus, result.report, result.created_at),
             )
         return result
+
+    def list_deep_reads(self, paper_id: str) -> list[DeepReadSummary]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT id, paper_id, focus,
+                          CASE WHEN length(report) > 240
+                               THEN substr(report, 1, 240) || '…' ELSE report END AS preview,
+                          created_at
+                   FROM deep_reads WHERE paper_id = ? ORDER BY created_at DESC""",
+                (paper_id,),
+            ).fetchall()
+        return [DeepReadSummary(**dict(row)) for row in rows]
+
+    def get_deep_read(self, deep_read_id: str) -> DeepReadResult | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM deep_reads WHERE id = ?", (deep_read_id,)
+            ).fetchone()
+        return DeepReadResult(**dict(row)) if row else None
 
     def save_llm_call(
         self,

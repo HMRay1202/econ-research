@@ -1,10 +1,11 @@
 # Architecture
 
 ```text
-CLI ---------+
-             +--> ResearchService --> Parser
-FastAPI -----+                    --> LLM
-                                  --> SQLiteRepository
+CLI ------------+
+                +--> ResearchService --> Parser
+FastAPI API ----+                    --> LLM
+                |                    --> SQLiteRepository
+Local web UI ---+ (only through /api/*)
 ```
 
 `ResearchService` owns the three workflows. Interfaces only translate input/output and do not
@@ -20,3 +21,8 @@ attempt was made, while local test doubles may omit telemetry.
 The OpenAI implementation is isolated behind one small protocol, but Phase 1 does not build a
 general multi-provider gateway. Provenance is represented by paper, chunk, page, and section
 references where the parser can supply them.
+
+The local web UI is a replaceable static client packaged with the Python application. It owns no
+business logic or persistence. Managed file endpoints accept opaque record IDs, resolve paths in
+the service, and refuse paths outside configured runtime directories; `data/` is never mounted as
+a public static directory. See `docs/frontend.md` and `docs/api-contracts.md` for extension rules.

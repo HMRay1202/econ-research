@@ -46,8 +46,10 @@ research usage --paper-id PAPER_ID --details
 research serve
 ```
 
-The API documentation is available at `http://127.0.0.1:8000/docs` while the server runs. Usage
-statistics are also available from `GET /api/usage` and `GET /api/papers/{paper_id}/usage`.
+After `research serve`, open `http://127.0.0.1:8000/` for the local research workspace. It can
+upload PDFs, browse cards and source chunks, search the library, access managed files, request
+deep reads, and inspect usage. The API documentation remains available at
+`http://127.0.0.1:8000/docs`.
 
 ## Data and privacy
 
@@ -63,4 +65,5 @@ conda run -n econ-research pytest
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
-[PROJECT_CHARTER.md](PROJECT_CHARTER.md).
+[PROJECT_CHARTER.md](PROJECT_CHARTER.md). Frontend maintainers should also read
+[docs/frontend.md](docs/frontend.md) and [docs/api-contracts.md](docs/api-contracts.md).

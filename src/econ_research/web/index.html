@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="本地优先的经济学论文研究工作台">
+    <title>Econ Research · 本地研究工作台</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">LOCAL RESEARCH WORKSPACE</p>
+        <h1>Econ Research</h1>
+      </div>
+      <div class="header-metrics" aria-label="系统统计">
+        <span id="health-pill" class="status-pill">正在连接</span>
+        <span><strong id="paper-total">0</strong> 篇论文</span>
+        <span><strong id="call-total">0</strong> 次调用</span>
+        <span><strong id="cost-total">$0.000000</strong> 估算费用</span>
+      </div>
+    </header>
+
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+    <section class="search-strip" aria-label="全局搜索">
+      <form id="search-form">
+        <label class="sr-only" for="search-query">搜索论文、卡片和原文</label>
+        <input id="search-query" name="query" type="search"
+               placeholder="搜索论文、研究卡片和原文片段，例如 identification" required>
+        <button type="submit">搜索</button>
+      </form>
+    </section>
+
+    <main class="workspace">
+      <aside class="library-panel">
+        <section class="upload-card">
+          <h2>导入论文</h2>
+          <p>导入会自动解析 PDF，并调用 Luna 生成研究卡片。</p>
+          <form id="upload-form">
+            <label class="file-picker" for="pdf-file">
+              <span>选择 PDF</span>
+              <input id="pdf-file" name="file" type="file" accept="application/pdf,.pdf"
+                     required>
+            </label>
+            <p id="selected-file" class="muted">尚未选择文件</p>
+            <button id="upload-button" type="submit" class="primary wide">导入并生成卡片</button>
+          </form>
+        </section>
+
+        <section class="paper-library">
+          <div class="section-heading">
+            <h2>论文库</h2>
+            <button id="refresh-papers" class="text-button" type="button">刷新</button>
+          </div>
+          <div id="paper-list" class="paper-list" aria-live="polite"></div>
+        </section>
+      </aside>
+
+      <section class="content-panel">
+        <section id="welcome-panel" class="empty-state">
+          <p class="eyebrow">READY WHEN YOU ARE</p>
+          <h2>选择一篇论文开始研究</h2>
+          <p>你可以浏览研究卡片、核对原文、搜索证据或按需生成深读报告。</p>
+        </section>
+
+        <div id="paper-workspace" hidden>
+          <section class="paper-hero">
+            <div>
+              <p id="paper-status" class="eyebrow"></p>
+              <h2 id="paper-title"></h2>
+              <p id="paper-meta" class="muted"></p>
+            </div>
+            <div class="file-actions">
+              <a id="original-link" class="secondary-button" target="_blank">打开原始 PDF</a>
+              <a id="parsed-link" class="secondary-button">下载解析文本</a>
+            </div>
+          </section>
+
+          <nav class="tab-bar" aria-label="论文内容">
+            <button class="tab active" data-tab="cards" type="button">研究卡片</button>
+            <button class="tab" data-tab="deep-reads" type="button">深读报告</button>
+            <button class="tab" data-tab="usage" type="button">调用记录</button>
+          </nav>
+
+          <section id="cards-panel" class="tab-panel">
+            <div class="toolbar">
+              <div>
+                <p class="eyebrow">STRUCTURED KNOWLEDGE</p>
+                <h3><span id="card-count">0</span> 张研究卡片</h3>
+              </div>
+              <div class="filters">
+                <label>
+                  <span class="sr-only">卡片类型</span>
+                  <select id="card-type-filter">
+                    <option value="">全部类型</option>
+                  </select>
+                </label>
+                <label>
+                  <span class="sr-only">筛选卡片内容</span>
+                  <input id="card-text-filter" type="search" placeholder="筛选当前卡片">
+                </label>
+              </div>
+            </div>
+            <div id="card-list" class="card-grid"></div>
+          </section>
+
+          <section id="deep-reads-panel" class="tab-panel" hidden>
+            <div class="deep-read-layout">
+              <div>
+                <p class="eyebrow">ON-DEMAND ANALYSIS</p>
+                <h3>生成新的深读</h3>
+                <p class="muted">只有提交此表单才会调用 Terra 并产生费用。</p>
+                <form id="deep-read-form">
+                  <label for="deep-read-focus">分析重点</label>
+                  <textarea id="deep-read-focus" rows="4"
+                            placeholder="例如：重点检查识别策略、内生性与外部有效性"></textarea>
+                  <button id="deep-read-button" type="submit" class="primary">调用 Terra</button>
+                </form>
+                <h3 class="history-title">历史报告</h3>
+                <div id="deep-read-list" class="report-list"></div>
+              </div>
+              <article class="report-viewer">
+                <div class="section-heading">
+                  <h3 id="report-title">选择一份报告</h3>
+                  <a id="report-download" class="text-button" hidden>下载 Markdown</a>
+                </div>
+                <pre id="report-content">历史报告和新生成的报告会显示在这里。</pre>
+              </article>
+            </div>
+          </section>
+
+          <section id="usage-panel" class="tab-panel" hidden>
+            <p class="eyebrow">MEASURED API ACTIVITY</p>
+            <h3>当前论文的调用记录</h3>
+            <div id="usage-summary" class="usage-cards"></div>
+            <div id="usage-calls" class="usage-table-wrap"></div>
+          </section>
+        </div>
+
+        <section id="search-panel" class="search-results" hidden>
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">GLOBAL SEARCH</p>
+              <h2>搜索结果</h2>
+            </div>
+            <button id="close-search" class="text-button" type="button">关闭</button>
+          </div>
+          <div id="search-results"></div>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="source-dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">SOURCE CHUNK</p>
+          <h2 id="source-title">原文依据</h2>
+        </div>
+        <button id="close-source" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <pre id="source-content"></pre>
+    </dialog>
+  </body>
+</html>
