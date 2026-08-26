@@ -51,6 +51,10 @@ upload PDFs, browse cards and source chunks, search the library, access managed 
 deep reads, and inspect usage. The API documentation remains available at
 `http://127.0.0.1:8000/docs`.
 
+On macOS, you can instead double-click `start-research.command` in Finder. It locates the existing
+`econ-research` Conda environment, starts the loopback-only server, and opens the workspace. Keep
+the terminal window open while using the app; close it or press Control-C to stop the server.
+
 ## Data and privacy
 
 Runtime data defaults to `data/`. PDFs, parsed paper text, databases, generated reports,
