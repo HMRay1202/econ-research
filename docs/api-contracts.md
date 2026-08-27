@@ -9,6 +9,7 @@ filesystem paths from them.
 | Method | Route | Purpose |
 |---|---|---|
 | `GET` | `/health` | Local service health |
+| `GET` | `/api/ui-version` | Version marker used by local launchers to distinguish this UI from an older running service |
 | `POST` | `/api/papers` | Upload and ingest one PDF |
 | `POST` | `/api/uploads` | Queue one PDF upload and return a task record |
 | `GET` | `/api/uploads` | List persisted active upload tasks for page-refresh recovery |

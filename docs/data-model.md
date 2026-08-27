@@ -7,8 +7,8 @@
   page range. Reparse replaces these derived records and reconnects cards by ordinal where possible.
 - `cards`: paper-owned structured knowledge with optional chunk/page/section provenance. A
   successful regeneration replaces the current card set; prior generation attempts remain tracked.
-- `card_generations`: status, timestamps, generated-card count, and error for every explicit
-  generation or retry request.
+- `card_generations`: status, timestamps, generated-card count, and error for every card
+  generation attempt, including initial import and explicit regeneration or retry requests.
 - `ingest_jobs`: local queued upload task, stage, progress, source filename, optional resulting
   paper/duplicate reference, timestamps, and error.
 - `deep_reads`: derived paper-specific reports with an optional focus.

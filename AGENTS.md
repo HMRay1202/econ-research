@@ -1,6 +1,6 @@
 # Repository Instructions
 
-- Work from the repository root: `/Users/minrui/Documents/Rutgers/Paper_Research`.
+- Work from the repository root: `/Users/minrui/Library/CloudStorage/OneDrive-RutgersUniversity/Rutgers-OD/Paper_Research`.
 - Keep Phase 1 small and follow `PROJECT_CHARTER.md`.
 - CLI and HTTP handlers must call the shared `ResearchService`.
 - The local web client must call documented `/api/*` routes. Never access SQLite, `.env`, runtime

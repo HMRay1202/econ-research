@@ -69,8 +69,9 @@ Formula OCR is enabled by default only when its optional dependencies are instal
 the existing environment with `conda run -n econ-research python -m pip install -e '.[formula]'`.
 The first use downloads model assets under ignored `data/models/`; it is not an OpenAI call. Set
 `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to turn it off on an unsupported or resource-constrained
-machine. The double-click launcher is macOS-only; on Windows, use `conda run -n econ-research
-research serve` from Anaconda Prompt and visit the printed `127.0.0.1` URL.
+machine. On Windows, use the equivalent `start-research.cmd` launcher or run
+`conda run -n econ-research research serve` from Anaconda Prompt and visit the printed
+`127.0.0.1` URL.
 
 On Apple Silicon, standard Docling/PyTorch stages may select MPS when the service is launched from
 Terminal. PaddleOCR Formula is separately reported in the upload timeline and currently runs on

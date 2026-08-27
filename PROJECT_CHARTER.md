@@ -3,8 +3,9 @@
 ## Purpose
 
 Build a local-first economics research workspace that turns papers into traceable, reusable
-knowledge. The immediate goal is deliberately smaller: reliably ingest one PDF, generate
-searchable research cards, and deep-read that paper later.
+knowledge. Phase 1 began with the deliberately small goal of reliably ingesting one PDF,
+generating searchable research cards, and deep-reading that paper later; it now also supports
+batch imports and the local maintenance workflows listed below.
 
 ## Phase 1
 

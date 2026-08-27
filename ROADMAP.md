@@ -20,9 +20,9 @@
 1. Improve parser observability and confidence-gated normalization for difficult PDF text and
    formulas, using representative local fixtures rather than replacing body text with full-page
    OCR.
-2. Add a Windows-friendly launcher or setup check; the application already runs through
-   `conda run -n econ-research research serve` on Windows, while the current double-click launcher
-   is macOS-only.
+2. Validate the existing Windows launcher and setup flow on a real Windows machine, including
+   environment creation or editable-install repair, CPU fallback, optional CUDA diagnostics, and
+   `conda run -n econ-research pytest`.
 3. Add card editing, approval, and export through additive service/API contracts.
 4. Add a cross-paper comparison tray, followed by optional semantic search only after defining
    quality, privacy, and local-model requirements.

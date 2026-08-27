@@ -12,6 +12,14 @@ searchable source passages, and paper-specific deep-reading reports.
 - Record per-call LLM token usage, latency, status, and price-snapshot cost estimates.
 - Search papers, cards, and source passages with SQLite FTS5.
 - Use the same application service from Typer CLI and FastAPI.
+- Reparse preserved PDFs locally, including optional crop-level formula OCR, without an LLM call.
+- Queue single or batch uploads with persisted progress, exact/likely duplicate detection, and
+  card-generation retry.
+- Maintain paper title/year metadata, archive or restore papers, and permanently purge a paper
+  only through the managed service workflow.
+
+Phase 1 is complete and usable locally. Its full scope and deferred work are defined in
+[PROJECT_CHARTER.md](PROJECT_CHARTER.md) and [ROADMAP.md](ROADMAP.md).
 
 ## Setup
 

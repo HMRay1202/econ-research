@@ -38,7 +38,8 @@ business logic or persistence. Managed file endpoints accept opaque record IDs, 
 the service, and refuse paths outside configured runtime directories; `data/` is never mounted as
 a public static directory. See `docs/frontend.md` and `docs/api-contracts.md` for extension rules.
 
-The browser client is platform-neutral. `start-research.command` is a macOS launcher around
-`conda run -n econ-research research serve`; Windows uses that command directly from an
+The browser client is platform-neutral. `start-research.command` is a macOS launcher and
+`start-research.cmd` is its Windows counterpart; both start the loopback service through
+`conda run -n econ-research research serve`. The same command can also be run directly from an
 Anaconda-enabled shell. Managed PDFs, parsed text, SQLite data, model assets, and temporary upload
 files remain under ignored runtime directories and are never static web assets.
