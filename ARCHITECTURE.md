@@ -8,7 +8,7 @@ FastAPI API ----+                    --> LLM
 Local web UI ---+ (only through /api/*)
 ```
 
-`ResearchService` owns the three workflows. Interfaces only translate input/output and do not
+`ResearchService` owns the four workflows. Interfaces only translate input/output and do not
 duplicate research logic. `Parser` converts a PDF to `ParsedDocument`. `ResearchLLM` generates
 cards and deep reads. `SQLiteRepository` persists and searches data.
 
@@ -20,7 +20,8 @@ attempt was made, while local test doubles may omit telemetry.
 
 The OpenAI implementation is isolated behind one small protocol, but Phase 1 does not build a
 general multi-provider gateway. Provenance is represented by paper, chunk, page, and section
-references where the parser can supply them.
+references where the parser can supply them. Reparsing replaces only generated Markdown/chunks,
+reconnects cards by stable chunk ordinal, and does not invoke `ResearchLLM`.
 
 The local web UI is a replaceable static client packaged with the Python application. It owns no
 business logic or persistence. Managed file endpoints accept opaque record IDs, resolve paths in

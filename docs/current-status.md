@@ -1,0 +1,80 @@
+# Current Status and Handoff
+
+## Snapshot
+
+Phase 1 is complete. The repository provides a local-first economics-paper workspace with a
+Typer CLI, FastAPI service, and a minimal loopback-only browser UI. The current branch is expected
+to be `main` and synchronized with its configured GitHub remote; confirm with `git status --short
+--branch` before starting work.
+
+The implementation is intentionally small. Do not introduce a second business-logic path: CLI
+commands and HTTP handlers must call `ResearchService`, LLM calls must go through `ResearchLLM`,
+and persistence must remain in `SQLiteRepository`.
+
+## Delivered capabilities
+
+- Import a PDF, preserve an immutable managed copy, parse it with Docling, create source chunks,
+  generate Luna research cards, and index papers/cards/chunks in SQLite FTS5.
+- Search one local library through CLI and documented `/api/*` routes.
+- Produce on-demand Terra deep reads with stored report history and measured usage telemetry.
+- Browse papers, cards, chunks, searches, managed files, deep reads, and usage in the local UI.
+- Reparse a ready paper with `research reparse PAPER_ID`. This refreshes generated Markdown,
+  title-page metadata, chunks, and page/section provenance without calling an LLM; cards are
+  reconnected by their prior chunk ordinal.
+- For legacy PDFs whose font mapping damages a title, run a focused first-page OCR fallback.
+  It updates recognized title, author, and year metadata without replacing the full body with OCR.
+
+## Local operation
+
+Use the existing Python 3.11 Conda environment, never Conda `base`:
+
+```bash
+conda run -n econ-research ruff check .
+conda run -n econ-research pytest
+conda run -n econ-research research serve
+```
+
+Open `http://127.0.0.1:8000/` after starting the server, or use `start-research.command` on
+macOS. The normal non-billable maintenance command is:
+
+```bash
+conda run -n econ-research research reparse PAPER_ID
+```
+
+Ingestion and deep reads can call OpenAI and are billable. Before and after an authorized real
+call, inspect `research usage --details`. Cards default to Luna/low reasoning; deep reads default
+to Terra/medium reasoning. Actual token totals and cost estimates live only in the ignored local
+SQLite database.
+
+## Data and Git boundaries
+
+The repository deliberately excludes `.env`, API keys, PDFs, SQLite databases, parsed paper text,
+generated reports, and other runtime data. Preserve original PDFs; never overwrite them with
+parsed or generated output. Stage only source, tests, and documentation. Do not add real-paper
+identifiers, model request IDs, or machine-specific paths to tracked documentation.
+
+Database changes must be additive or explicitly migrated. Never delete a runtime database to make
+a schema change work. Browser code may call only documented `/api/*` routes and must never access
+SQLite, runtime directories, `.env`, or an API key directly.
+
+## Parser quality and known limitation
+
+Page provenance is now preserved for source chunks and inherited by cards when possible. A
+focused OCR fallback repairs damaged title-page metadata in old PDFs lacking usable Unicode font
+mappings. Dense body text continues to use Docling-native extraction because full-page OCR can
+silently introduce different transcription errors. For quotations or numerical claims, consult
+the original PDF.
+
+The next parser improvement should be confidence-gated and testable on representative PDFs; do
+not globally replace body text with OCR. Keep both the source PDF and parser output available for
+comparison.
+
+## Safe next increments
+
+1. Card export/editing with a service method, additive API contract, and UI tests.
+2. Cross-paper comparison tray using existing paper/card/chunk APIs.
+3. Confidence-based normalization of known legacy-font defects, with source-page review.
+4. Optional semantic search only after defining retrieval quality and privacy requirements.
+
+Before changing browser-facing behavior, update `docs/api-contracts.md` and frontend tests. Read
+`AGENTS.md`, `DEVELOPMENT.md`, `ARCHITECTURE.md`, and `docs/frontend.md` before implementation.

@@ -8,7 +8,9 @@
 - [x] Pass offline automated tests.
 - [x] Pass a real PDF/OpenAI end-to-end test.
 - [x] Add a minimal local browser workspace and stable read/file APIs.
+- [x] Preserve parser page provenance and provide a non-billable reparse workflow for existing
+  papers.
 
-Next candidates are card export/editing, cross-paper comparison, improved page provenance,
-semantic search, and Zotero integration. Knowledge graphs remain deferred until a concrete
-research workflow justifies their additional complexity.
+Next candidates are card export/editing, cross-paper comparison, confidence-gated body-text
+normalization for legacy PDFs, semantic search, and Zotero integration. Knowledge graphs remain
+deferred until a concrete research workflow justifies their additional complexity.
