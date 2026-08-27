@@ -27,6 +27,10 @@ and persistence must remain in `SQLiteRepository`.
   Formula. Formula OCR is crop-level rather than full-page OCR; a missing or failed recognizer
   preserves Docling text and records diagnostics on the paper. The UI's **重新解析公式** control
   reruns this local, non-billable parsing workflow.
+- Queue single or batch uploads with stage progress, retain exact/likely duplicate information,
+  retry billable card generation from stored chunks, and show generation/usage history.
+- Support manual paper title/year overrides, soft archive/restore, and explicit permanent purge
+  while keeping managed paths behind service-controlled file endpoints.
 
 ## Local operation
 
@@ -54,7 +58,8 @@ Formula OCR is enabled by default only when its optional dependencies are instal
 the existing environment with `conda run -n econ-research python -m pip install -e '.[formula]'`.
 The first use downloads model assets under ignored `data/models/`; it is not an OpenAI call. Set
 `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to turn it off on an unsupported or resource-constrained
-machine.
+machine. The double-click launcher is macOS-only; on Windows, use `conda run -n econ-research
+research serve` from Anaconda Prompt and visit the printed `127.0.0.1` URL.
 
 ## Data and Git boundaries
 

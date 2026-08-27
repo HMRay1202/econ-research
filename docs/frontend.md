@@ -45,6 +45,8 @@ editable checkout as well.
 - A selected paper can be renamed or have its year edited through **修改标题** and **修改年份**.
   Each change is marked as manual, updates library search, and remains in place if the source PDF
   is reparsed.
+- **重新解析公式** retries the non-billable parser pipeline from the preserved original PDF; users
+  explicitly regenerate cards afterward if the revised text should become LLM input.
 
 Dynamic strings are assigned through `textContent`; do not render model or PDF-derived content
 with `innerHTML`. The UI uses same-origin requests, so CORS is neither needed nor enabled.
@@ -65,16 +67,13 @@ remain compatible.
 
 ## Known limitations and good next changes
 
-- Parser output now prefers a credible PDF metadata title before relying on layout extraction,
-  preserves source-chunk page ranges, and uses a title-page OCR fallback when legacy PDF font
-  mappings damage the title. With the optional `.[formula]` dependency installed, Docling's
-  formula boxes are cropped and passed individually to PaddleOCR Formula; invalid, failed, or
-  unavailable recognition safely retains Docling text and records an explanatory formula error.
-  **重新解析公式** invokes the non-billable
-  reparse route, so cards must be explicitly regenerated before they use revised formulas. The
-  older `ECON_RESEARCH_FORMULA_ENRICHMENT=true` CodeFormula path remains opt-in and is not the
-  default. Dense body text remains Docling-native because full-page OCR can introduce new
-  transcription errors; users should consult the original PDF for verbatim quotations.
+- Parser output prefers a credible PDF metadata title before layout extraction, preserves
+  source-chunk page ranges, and uses a title-page OCR fallback when legacy PDF font mappings
+  damage the title. With optional `.[formula]`, Docling formula boxes are cropped and passed to
+  PaddleOCR Formula. Invalid, failed, or unavailable recognition keeps Docling text and records a
+  formula error; the older `ECON_RESEARCH_FORMULA_ENRICHMENT=true` CodeFormula path remains
+  experimental and opt-in. Dense body text remains Docling-native because full-page OCR can
+  introduce new transcription errors; consult the original PDF for quotations.
 - Cards cannot yet be edited, approved, or exported as a collection. Generation attempts are
   retained as history; the current card set is replaced only after a successful generation.
 - Global cards can be filtered by paper, type, and claim kind, but tag normalization is deferred.

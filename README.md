@@ -62,6 +62,17 @@ On macOS, you can instead double-click `start-research.command` in Finder. It lo
 `econ-research` Conda environment, starts the loopback-only server, and opens the workspace. Keep
 the terminal window open while using the app; close it or press Control-C to stop the server.
 
+On Windows, run the same server command from **Anaconda Prompt** (or another shell in which Conda
+is available), then open the displayed loopback address in a browser:
+
+```powershell
+conda run -n econ-research research serve
+```
+
+`start-research.command` is a macOS convenience launcher, not a cross-platform requirement. The
+web application, its SQLite data, and the optional formula parser use project-relative runtime
+paths and do not depend on a macOS-only browser integration.
+
 `research reparse PAPER_ID` regenerates the stored Markdown and source chunks from the preserved
 original PDF. It is useful after parser improvements: it refreshes paper metadata and page
 provenance, reconnects existing cards by chunk ordinal, and does not call an LLM or regenerate
@@ -76,6 +87,11 @@ step. The older `ECON_RESEARCH_FORMULA_ENRICHMENT=true` CodeFormula path remains
 is off by default because its accuracy and latency vary by PDF. Use **重新解析公式** to retry the
 non-billable local parse from a preserved original PDF, then explicitly regenerate cards if the
 updated formulas should be included in LLM input.
+
+The first PaddleOCR Formula run downloads model assets to ignored `data/models/`. If installation,
+model loading, or one formula crop fails, the paper remains available with Docling text and formula
+diagnostics in its detail view; formula recognition never turns a successful document parse into a
+failed upload.
 
 ## Data and privacy
 

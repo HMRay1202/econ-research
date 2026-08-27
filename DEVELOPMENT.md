@@ -24,6 +24,13 @@ Docling's extracted formula text is retained; the paper records the unavailable/
 status instead of failing the complete import. Set `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to
 disable the optional step deliberately.
 
+On macOS, `start-research.command` is a convenience launcher. On Windows, use Anaconda Prompt and
+the platform-neutral server command instead:
+
+```powershell
+conda run -n econ-research research serve
+```
+
 For agents and non-interactive shells, `conda run -n econ-research COMMAND` is the canonical
 form because it does not depend on shell activation. SQLite must support FTS5; the test suite
 verifies this.
@@ -70,6 +77,8 @@ Reparsing is local and non-billable: it uses the preserved PDF, refreshes parsed
 chunk provenance, and reconnects existing cards without calling the LLM.
 It also retries formula OCR. It does not rewrite existing card text, so regenerate cards only
 after reviewing the revised source text; that regeneration is an LLM call and may be billable.
+For parser diagnosis, inspect `formula_status` and `formula_error` in the paper response or web
+detail view before changing dependencies or disabling formula OCR.
 Schema initialization is additive (`CREATE ... IF NOT EXISTS`) so an existing Phase 1 database
 gains new tables without discarding papers. Future incompatible changes require an explicit
 migration rather than database deletion.

@@ -9,8 +9,10 @@ searchable research cards, and deep-read that paper later.
 ## Phase 1
 
 Phase 1 contains Python, Docling, the OpenAI API, SQLite/FTS5, a shared application service,
-a Typer CLI, a minimal FastAPI API, and a local browser workspace. It supports `ingest`,
-`reparse`, `search`, and `deep-read`.
+a Typer CLI, a FastAPI API, and a local browser workspace. It supports ingestion and non-billable
+reparse, lexical search, card generation and regeneration, deep reads, usage history, batch
+uploads with progress, duplicate detection, manual paper metadata, and archive/restore/remove
+controls.
 
 Original PDFs are authoritative and never modified. Parsed Markdown and chunks remain close
 to the source. Cards and deep reads are derived content and may be regenerated; they never
@@ -27,7 +29,9 @@ multiple LLM providers, user accounts, a React frontend, or cloud deployment.
 Phase 1 is complete and usable locally. It has been exercised with a real PDF and the local web
 workspace. Source chunks retain section and page provenance when Docling provides it; existing
 papers can be refreshed with `research reparse PAPER_ID` after parser improvements without an LLM
-call. See `docs/current-status.md` for the handoff record and next work candidates.
+call. An optional PaddleOCR Formula enhancement converts Docling-detected formula regions to
+LaTeX while retaining a safe Docling fallback. See `docs/current-status.md` for the handoff record
+and next work candidates.
 
 ## Completion criterion
 

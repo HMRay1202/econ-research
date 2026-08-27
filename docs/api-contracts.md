@@ -14,10 +14,18 @@ filesystem paths from them.
 | `GET` | `/api/uploads/{job_id}` | Read upload, parse, and card-generation progress |
 | `GET` | `/api/papers` | List papers |
 | `GET` | `/api/papers/{paper_id}` | Get one paper |
-| `PATCH` | `/api/papers/{paper_id}` | Set a manually maintained paper title |
+| `PATCH` | `/api/papers/{paper_id}` | Set manually maintained paper title and/or year |
 | `POST` | `/api/papers/{paper_id}/reparse` | Reparse preserved PDF and retry local formula OCR without an LLM call |
+| `POST` | `/api/papers/{paper_id}/card-generations` | Billably regenerate cards from current chunks |
+| `GET` | `/api/papers/{paper_id}/card-generations` | List card-generation history |
+| `GET` | `/api/papers/{paper_id}/cards` | List one paper's cards |
+| `GET` | `/api/cards` | List cards across papers |
+| `GET` | `/api/papers/{paper_id}/chunks` | List ordered source chunks |
 | `GET` | `/api/search?q=...` | Search papers, cards, and chunks |
 | `POST` | `/api/papers/{paper_id}/deep-read` | Run a billable Terra deep read |
+| `GET` | `/api/papers/{paper_id}/deep-reads` | List deep-read history |
+| `GET` | `/api/deep-reads/{deep_read_id}` | Get one stored deep read |
+| `GET` | `/api/deep-reads/{deep_read_id}/download` | Download one deep read as Markdown |
 | `GET` | `/api/usage` | Aggregate or detailed LLM usage |
 | `GET` | `/api/papers/{paper_id}/usage` | Paper-scoped LLM usage |
 | `DELETE` | `/api/papers/{paper_id}` | Soft-archive a paper while retaining managed files and history |
@@ -85,7 +93,8 @@ does not remain permanently blocked.
 
 `POST /api/papers/{paper_id}/card-generations` runs a new billable Luna generation from existing
 source chunks. `GET /api/papers/{paper_id}/card-generations` returns the generation history. A
-card failure leaves the parsed paper available and sets `Paper.card_status` to `failed`.
+card failure leaves the parsed paper available and sets `Paper.card_status` to `failed`; a later
+successful run replaces its current card set.
 
 `POST /api/papers/{paper_id}/reparse` refreshes Markdown, source chunks, page provenance, and
 formula OCR from the managed original PDF. It does not call an LLM or regenerate cards. The

@@ -8,6 +8,11 @@ FastAPI API ----+                    --> LLM
 Local web UI ---+ (only through /api/*)
 ```
 
+The local upload queue is owned by `ResearchService`: it records transfer-independent task status,
+performs duplicate checks, parses, and optionally generates cards. A reparse is separate and local
+only. It refreshes parser output (including optional formula OCR), then reconnects current cards;
+an explicit card generation is required before revised source text reaches an LLM prompt.
+
 `ResearchService` owns the four workflows. Interfaces only translate input/output and do not
 duplicate research logic. `Parser` converts a PDF to `ParsedDocument`. Its Docling adapter first
 extracts document text and then, when the optional formula dependency is installed, sends only
@@ -32,3 +37,8 @@ The local web UI is a replaceable static client packaged with the Python applica
 business logic or persistence. Managed file endpoints accept opaque record IDs, resolve paths in
 the service, and refuse paths outside configured runtime directories; `data/` is never mounted as
 a public static directory. See `docs/frontend.md` and `docs/api-contracts.md` for extension rules.
+
+The browser client is platform-neutral. `start-research.command` is a macOS launcher around
+`conda run -n econ-research research serve`; Windows uses that command directly from an
+Anaconda-enabled shell. Managed PDFs, parsed text, SQLite data, model assets, and temporary upload
+files remain under ignored runtime directories and are never static web assets.
