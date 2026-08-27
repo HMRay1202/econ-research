@@ -16,7 +16,7 @@ def test_api_uses_shared_service(service: ResearchService, sample_pdf: Path) -> 
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/styles.css").status_code == 200
     assert client.get("/health").json() == {"status": "ok"}
-    assert client.get("/api/ui-version").json()["version"] == "2026-08-27-formula-v2"
+    assert client.get("/api/ui-version").json()["version"] == "2026-08-27-upload-events-v1"
     with sample_pdf.open("rb") as handle:
         response = client.post(
             "/api/papers", files={"file": ("paper.pdf", handle, "application/pdf")}
@@ -104,6 +104,10 @@ def test_api_queued_upload_card_regeneration_and_archive(
         sleep(0.01)
     assert job["status"] == "succeeded"
     paper_id = job["paper_id"]
+    events = client.get(f"/api/uploads/{job_id}/events")
+    assert events.status_code == 200
+    assert any(event["stage"] == "parsing" for event in events.json())
+    assert events.json()[-1]["stage"] == "completed"
 
     generation = client.post(f"/api/papers/{paper_id}/card-generations")
     assert generation.status_code == 200
@@ -144,6 +148,8 @@ def test_frontend_restores_active_upload_jobs_after_refresh(service: ResearchSer
     assert "async function restoreUploadJobs()" in script.text
     assert 'api("/api/uploads")' in script.text
     assert "job.message" in script.text
+    assert "loadUploadEvents" in script.text
+    assert "/events" in script.text
 
 
 def test_read_api_returns_not_found(service: ResearchService) -> None:

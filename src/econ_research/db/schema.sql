@@ -82,6 +82,15 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     completed_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ingest_job_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL REFERENCES ingest_jobs(id) ON DELETE CASCADE,
+    stage TEXT NOT NULL,
+    progress INTEGER NOT NULL CHECK (progress >= 0 AND progress <= 100),
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS card_generations (
     id TEXT PRIMARY KEY,
     paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
@@ -132,6 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_paper ON llm_calls(paper_id, started_at
 CREATE INDEX IF NOT EXISTS idx_llm_calls_operation ON llm_calls(operation, started_at);
 CREATE INDEX IF NOT EXISTS idx_paper_sources_paper ON paper_sources(paper_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created ON ingest_jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_ingest_job_events_job_created
+    ON ingest_job_events(job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_card_generations_paper ON card_generations(paper_id, created_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(

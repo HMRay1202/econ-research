@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,8 +51,18 @@ class DoclingParser:
         self._converter = DocumentConverter(format_options=format_options)
         self._formula_enricher = FormulaEnricher() if paddle_formula_ocr else None
 
-    def parse(self, pdf_path: Path) -> ParsedDocument:
+    def parse(
+        self,
+        pdf_path: Path,
+        on_progress: Callable[[str, int, str], None] | None = None,
+    ) -> ParsedDocument:
+        if on_progress:
+            on_progress("preparing_models", 22, "正在配置 Docling 文档模型和加速设备。")
+        if on_progress:
+            on_progress("parsing", 30, "正在由 Docling 读取 PDF 并提取页面布局与文本。")
         result = self._converter.convert(str(pdf_path))
+        if on_progress:
+            on_progress("parsing", 52, "Docling 已完成页面解析，正在整理文档内容。")
         markdown = result.document.export_to_markdown().strip()
         if not markdown:
             raise ValueError("Docling returned an empty document")
@@ -66,7 +77,28 @@ class DoclingParser:
             markdown = _replace_title_page_metadata(markdown, authors, year)
         formula_result = None
         if self._formula_enricher is not None:
-            formula_result = self._formula_enricher.enrich(pdf_path, result.document.texts)
+            if on_progress:
+                on_progress("formula_detection", 58, "正在检测需要额外识别的公式区域。")
+
+            def report_formula_progress(completed: int, total: int) -> None:
+                if on_progress:
+                    if total == 0:
+                        on_progress(
+                            "formula_detection",
+                            65,
+                            "未发现需要额外识别的公式，正在继续整理内容。",
+                        )
+                        return
+                    progress = 60 + round(10 * completed / max(total, 1))
+                    on_progress(
+                        "formula_ocr",
+                        progress,
+                        f"正在使用 PaddleOCR 识别公式：{completed}/{total}。",
+                    )
+
+            formula_result = self._formula_enricher.enrich(
+                pdf_path, result.document.texts, on_progress=report_formula_progress
+            )
             markdown = apply_formula_replacements(
                 markdown, result.document.texts, formula_result.replacements
             )
@@ -74,6 +106,8 @@ class DoclingParser:
         blocks = docling_text_blocks(result.document.texts, overrides)
         if title_was_repaired:
             blocks = _replace_first_block_heading(blocks, title)
+        if on_progress:
+            on_progress("chunking", 70, "正在按章节和页码整理可检索文本块。")
         return ParsedDocument(
             title=title,
             authors=authors,

@@ -48,10 +48,11 @@ research serve
 ```
 
 After `research serve`, open `http://127.0.0.1:8000/` for the local research workspace. It can
-queue single or batch PDF uploads with progress, detect exact and likely duplicates, retry card
-generation without reparsing, archive papers, browse cards and source chunks, search the library,
-access managed files, request deep reads, and inspect per-paper and global usage history. The API
-documentation remains available at
+queue single or batch PDF uploads with persisted backend activity, elapsed-time heartbeats, and
+refresh-safe progress recovery; detect exact and likely duplicates; retry card generation without
+reparsing; archive papers; browse cards and source chunks; search the library; access managed
+files; request deep reads; and inspect per-paper and global usage history. The API documentation
+remains available at
 `http://127.0.0.1:8000/docs`.
 
 Do not open `src/econ_research/web/index.html` directly with a `file:///` URL: it is a static

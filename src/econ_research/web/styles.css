@@ -114,6 +114,8 @@ button:disabled { cursor: wait; opacity: .55; }
 .upload-job { display: grid; grid-template-columns: minmax(0, 1fr) 6rem; gap: .35rem .6rem; align-items: center; font-size: .78rem; }
 .upload-job small { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .upload-job progress { width: 100%; }
+.upload-timing { font-variant-numeric: tabular-nums; }
+.upload-events { grid-column: 1 / -1; max-height: 7.5rem; margin: .1rem 0 0; padding-left: 1.1rem; overflow: auto; color: var(--muted); font-size: .72rem; line-height: 1.45; }
 .danger-button { color: #8f2419; }
 .file-picker { display: block; padding: .8rem; border: 1px dashed #9cac9f; border-radius: .55rem; text-align: center; cursor: pointer; }
 .file-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; }

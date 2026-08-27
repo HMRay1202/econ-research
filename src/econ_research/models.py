@@ -122,6 +122,17 @@ class IngestJob(BaseModel):
     completed_at: str | None = None
 
 
+class IngestJobEvent(BaseModel):
+    """One persisted, human-readable update emitted while an upload is processed."""
+
+    id: int
+    job_id: str
+    stage: str
+    progress: int = Field(ge=0, le=100)
+    message: str
+    created_at: str
+
+
 class CardGeneration(BaseModel):
     id: str
     paper_id: str

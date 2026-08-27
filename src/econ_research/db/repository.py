@@ -16,6 +16,7 @@ from econ_research.models import (
     DeepReadResult,
     DeepReadSummary,
     IngestJob,
+    IngestJobEvent,
     LLMCall,
     LLMCallMetrics,
     Paper,
@@ -326,6 +327,15 @@ class SQLiteRepository:
             ).fetchall()
         return [IngestJob(**dict(row)) for row in rows]
 
+    def list_ingest_job_events(self, job_id: str, *, limit: int = 50) -> list[IngestJobEvent]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT * FROM ingest_job_events WHERE job_id = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (job_id, limit),
+            ).fetchall()
+        return [IngestJobEvent(**dict(row)) for row in reversed(rows)]
+
     def update_ingest_job(
         self,
         job_id: str,
@@ -364,6 +374,13 @@ class SQLiteRepository:
         values.append(job_id)
         with self.connect() as connection:
             connection.execute(f"UPDATE ingest_jobs SET {', '.join(updates)} WHERE id = ?", values)
+            if message is not None and stage is not None and progress is not None:
+                connection.execute(
+                    """INSERT INTO ingest_job_events
+                       (job_id, stage, progress, message, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (job_id, stage, progress, message, utc_now()),
+                )
 
     def interrupt_running_jobs(self) -> None:
         with self.connect() as connection:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,14 @@ from econ_research.service import ResearchService
 
 
 class FakeParser:
-    def parse(self, pdf_path: Path) -> ParsedDocument:
+    def parse(
+        self,
+        pdf_path: Path,
+        on_progress: Callable[[str, int, str], None] | None = None,
+    ) -> ParsedDocument:
         assert pdf_path.read_bytes().startswith(b"%PDF-")
+        if on_progress:
+            on_progress("parsing", 45, "测试解析器正在读取 PDF。")
         markdown = """# Employment Effects of a Policy
 
 ## Research Design

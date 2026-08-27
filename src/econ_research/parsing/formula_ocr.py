@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
@@ -125,9 +126,16 @@ class FormulaEnricher:
         self.cropper = cropper or PdfFormulaCropper()
         self.max_formulas = max_formulas
 
-    def enrich(self, pdf_path: Path, items: list[object]) -> FormulaEnrichmentResult:
+    def enrich(
+        self,
+        pdf_path: Path,
+        items: list[object],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> FormulaEnrichmentResult:
         candidates = formula_candidates(items)[: self.max_formulas]
         if not candidates:
+            if on_progress:
+                on_progress(0, 0)
             return FormulaEnrichmentResult({}, 0, 0, 0, "not_found")
         if isinstance(self.recognizer, PaddleFormulaRecognizer):
             self.recognizer.set_cache_dir(pdf_path.parent.parent / "models" / "paddlex")
@@ -137,6 +145,8 @@ class FormulaEnricher:
         with tempfile.TemporaryDirectory(prefix="econ-research-formula-") as temporary:
             directory = Path(temporary)
             for index, candidate in enumerate(candidates):
+                if on_progress:
+                    on_progress(index, len(candidates))
                 image_path = directory / f"formula-{index}.png"
                 try:
                     self.cropper.crop(pdf_path, candidate, image_path)
@@ -154,6 +164,8 @@ class FormulaEnricher:
                         candidate.page_no,
                         exc,
                     )
+                if on_progress:
+                    on_progress(index + 1, len(candidates))
         recognized = len(replacements)
         fallback = len(candidates) - recognized
         status = "unavailable" if unavailable and not recognized else (

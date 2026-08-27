@@ -18,6 +18,7 @@ from econ_research.models import (
     DeepReadResult,
     DeepReadSummary,
     IngestJob,
+    IngestJobEvent,
     IngestResult,
     Paper,
     ReparseResult,
@@ -34,7 +35,7 @@ from econ_research.service import (
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 WEB_DIR = Path(__file__).with_name("web")
-WEB_UI_VERSION = "2026-08-27-formula-v2"
+WEB_UI_VERSION = "2026-08-27-upload-events-v1"
 
 
 class DeepReadRequest(BaseModel):
@@ -129,6 +130,14 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
     def get_upload(request: Request, job_id: str) -> IngestJob:
         try:
             return get_service(request).get_ingest_job(job_id)
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/uploads/{job_id}/events", response_model=list[IngestJobEvent])
+    def list_upload_events(request: Request, job_id: str) -> list[IngestJobEvent]:
+        """Return persisted backend activity so the browser can recover a detailed timeline."""
+        try:
+            return get_service(request).list_ingest_job_events(job_id)
         except PaperNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

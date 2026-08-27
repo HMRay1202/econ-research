@@ -8,6 +8,7 @@ const state = {
   deepReads: [],
   usage: null,
   uploadJobs: new Map(),
+  uploadEvents: new Map(),
 };
 
 const byId = (id) => document.getElementById(id);
@@ -47,9 +48,30 @@ function renderUploadJobs() {
       "small", "muted",
       `${job.progress}% · ${job.message || "正在等待后台更新。"}${job.error ? ` · ${job.error}` : ""}`,
     );
-    row.append(label, progress, detail);
+    const timestamps = node(
+      "small", "muted upload-timing",
+      `已运行 ${formatElapsed(job.started_at || job.created_at)} · 最近更新 ${formatDate(job.updated_at)}`,
+    );
+    const events = state.uploadEvents.get(job.id) || [];
+    const timeline = node("ol", "upload-events");
+    events.slice(-4).reverse().forEach((event) => {
+      timeline.append(node("li", "", `${formatDate(event.created_at)} · ${event.message}`));
+    });
+    row.append(label, progress, detail, timestamps);
+    if (timeline.childElementCount) row.append(timeline);
     list.append(row);
   }
+}
+
+function formatElapsed(startedAt) {
+  if (!startedAt) return "刚刚开始";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+async function loadUploadEvents(jobId) {
+  const events = await api(`/api/uploads/${jobId}/events`);
+  state.uploadEvents.set(jobId, events);
 }
 
 function uploadWithProgress(file) {
@@ -81,8 +103,9 @@ async function watchUpload(job) {
   state.uploadJobs.set(job.id, job);
   renderUploadJobs();
   while (["queued", "running"].includes(job.status)) {
-    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
     job = await api(`/api/uploads/${job.id}`);
+    await loadUploadEvents(job.id);
     state.uploadJobs.set(job.id, job);
     renderUploadJobs();
   }
@@ -100,7 +123,10 @@ async function watchUpload(job) {
 
 async function restoreUploadJobs() {
   const jobs = await api("/api/uploads");
-  for (const job of jobs) state.uploadJobs.set(job.id, job);
+  await Promise.all(jobs.map(async (job) => {
+    state.uploadJobs.set(job.id, job);
+    await loadUploadEvents(job.id);
+  }));
   renderUploadJobs();
   jobs.forEach((job) => { void watchUpload(job); });
 }

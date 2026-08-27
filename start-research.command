@@ -6,7 +6,7 @@ setopt no_bg_nice
 PROJECT_DIR="${0:A:h}"
 APP_URL="http://127.0.0.1:8000/"
 HEALTH_URL="${APP_URL}health"
-UI_VERSION="2026-08-27-formula-v2"
+UI_VERSION="2026-08-27-upload-events-v1"
 UI_VERSION_URL="${APP_URL}api/ui-version"
 
 cd "$PROJECT_DIR"

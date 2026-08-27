@@ -27,8 +27,11 @@ and persistence must remain in `SQLiteRepository`.
   Formula. Formula OCR is crop-level rather than full-page OCR; a missing or failed recognizer
   preserves Docling text and records diagnostics on the paper. The UI's **重新解析公式** control
   reruns this local, non-billable parsing workflow.
-- Queue single or batch uploads with stage progress, retain exact/likely duplicate information,
-  retry billable card generation from stored chunks, and show generation/usage history.
+- Queue single or batch uploads with persisted stage progress, detailed backend activity events,
+  ten-second liveness heartbeats, elapsed time, and refresh-safe progress restoration. Parser
+  callbacks report real milestones such as Docling parsing and per-formula PaddleOCR work rather
+  than fabricating page-level completion values. Retain exact/likely duplicate information, retry
+  billable card generation from stored chunks, and show generation/usage history.
 - Support manual paper title/year overrides, soft archive/restore, and explicit permanent purge
   while keeping managed paths behind service-controlled file endpoints.
 
@@ -68,6 +71,10 @@ The first use downloads model assets under ignored `data/models/`; it is not an 
 `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to turn it off on an unsupported or resource-constrained
 machine. The double-click launcher is macOS-only; on Windows, use `conda run -n econ-research
 research serve` from Anaconda Prompt and visit the printed `127.0.0.1` URL.
+
+On Apple Silicon, standard Docling/PyTorch stages may select MPS when the service is launched from
+Terminal. PaddleOCR Formula is separately reported in the upload timeline and currently runs on
+its supported Paddle device; the standard macOS PaddlePaddle runtime is CPU-only.
 
 ## Data and Git boundaries
 

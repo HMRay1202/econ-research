@@ -13,6 +13,7 @@ filesystem paths from them.
 | `POST` | `/api/uploads` | Queue one PDF upload and return a task record |
 | `GET` | `/api/uploads` | List persisted active upload tasks for page-refresh recovery |
 | `GET` | `/api/uploads/{job_id}` | Read upload, parse, and card-generation progress |
+| `GET` | `/api/uploads/{job_id}/events` | Read the persisted backend activity timeline for one upload |
 | `GET` | `/api/papers` | List papers |
 | `GET` | `/api/papers/{paper_id}` | Get one paper |
 | `PATCH` | `/api/papers/{paper_id}` | Set manually maintained paper title and/or year |
@@ -74,7 +75,9 @@ route, but returns `202` after browser transfer. The local single-worker queue v
 deduplicates, parses, and generates cards; poll `GET /api/uploads/{job_id}` while status is
 `queued` or `running`. `GET /api/uploads` returns persisted active tasks by default, so a browser
 refresh can restore progress display. `message` is the latest human-readable backend update and
-`updated_at` records when it was written.
+`updated_at` records when it was written. Concrete parser steps are persisted as events; during a
+long-running opaque model call, the service emits a ten-second liveness heartbeat instead of
+inventing a page-level percentage.
 
 ```json
 {
@@ -88,6 +91,21 @@ refresh can restore progress display. `message` is the latest human-readable bac
   "message": "正在读取并解析 PDF；首次运行可能准备本地模型。",
   "updated_at": "2026-08-27T12:00:00+00:00",
   "error": null
+}
+```
+
+`GET /api/uploads/{job_id}/events` returns the oldest-to-newest persisted events (up to 50). Each
+event has the additive representation below, allowing the browser to restore a detailed activity
+timeline after refresh.
+
+```json
+{
+  "id": 42,
+  "job_id": "opaque-job-id",
+  "stage": "formula_ocr",
+  "progress": 65,
+  "message": "正在使用 PaddleOCR 识别公式：3/8。",
+  "created_at": "2026-08-27T12:01:10+00:00"
 }
 ```
 

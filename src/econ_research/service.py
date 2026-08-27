@@ -4,8 +4,11 @@ import hashlib
 import logging
 import re
 import shutil
+import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,6 +22,7 @@ from econ_research.models import (
     DeepReadResult,
     DeepReadSummary,
     IngestJob,
+    IngestJobEvent,
     IngestResult,
     Paper,
     ParsedChunk,
@@ -53,6 +57,64 @@ def _stage_message(stage: str) -> str:
     }.get(stage, f"正在执行：{stage}。")
 
 
+class _IngestProgressReporter:
+    """Persist parser updates and keep opaque model work visibly alive in the UI."""
+
+    def __init__(self, service: ResearchService, job_id: str) -> None:
+        self._service = service
+        self._job_id = job_id
+        self._stage = "queued"
+        self._progress = 0
+        self._message = "已加入本地导入队列，正在等待可用工作线程。"
+        self._started_at = time.monotonic()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def update(
+        self,
+        stage: str,
+        progress: int,
+        message: str,
+        *,
+        status: str | None = None,
+    ) -> None:
+        with self._lock:
+            self._stage, self._progress, self._message = stage, progress, message
+        self._service._report_ingest_job(
+            self._job_id,
+            status=status,
+            stage=stage,
+            progress=progress,
+            message=message,
+        )
+
+    def start_heartbeat(self) -> None:
+        self._thread = threading.Thread(
+            target=self._heartbeat_loop,
+            name=f"econ-research-upload-heartbeat-{self._job_id[:8]}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+
+    def _heartbeat_loop(self) -> None:
+        while not self._stop.wait(10):
+            with self._lock:
+                stage, progress, message = self._stage, self._progress, self._message
+            elapsed = int(time.monotonic() - self._started_at)
+            self._service._report_ingest_job(
+                self._job_id,
+                stage=stage,
+                progress=progress,
+                message=f"{message} 后台仍在运行，已用时 {elapsed // 60} 分 {elapsed % 60} 秒。",
+            )
+
+
 class ResearchService:
     def __init__(
         self,
@@ -78,7 +140,9 @@ class ResearchService:
         self._jobs = ThreadPoolExecutor(max_workers=1, thread_name_prefix="econ-research-ingest")
 
     def ingest(
-        self, source: Path | str, on_stage: Callable[[str, int], None] | None = None
+        self,
+        source: Path | str,
+        on_stage: Callable[[str, int, str], None] | None = None,
     ) -> IngestResult:
         source_path = Path(source).expanduser().resolve()
         self._validate_pdf(source_path)
@@ -112,9 +176,13 @@ class ResearchService:
             )
         try:
             if on_stage:
-                on_stage("parsing", 30)
-            document = self.parser.parse(pdf_path)
+                on_stage("preparing_parser", 15, "正在准备 Docling 解析器和本地模型。")
+            document = self.parser.parse(pdf_path, on_progress=on_stage)
+            if on_stage:
+                on_stage("exporting", 72, "正在导出 Markdown 并整理页面来源。")
             markdown_path.write_text(document.markdown, encoding="utf-8")
+            if on_stage:
+                on_stage("indexing", 82, "正在保存解析结果并建立本地索引。")
             chunk_count, _ = self.repository.finalize_ingest(
                 paper_id, str(markdown_path), document, []
             )
@@ -129,11 +197,11 @@ class ResearchService:
                 normalized_text_sha256=_normalized_text_sha256(document.markdown),
             )
             if on_stage:
-                on_stage("generating_cards", 75)
+                on_stage("generating_cards", 88, "正在生成研究卡片；此步骤可能调用已配置的 LLM。")
             self.regenerate_cards(paper_id)
             card_count = self.repository.count_cards(paper_id)
             if on_stage:
-                on_stage("saving", 95)
+                on_stage("saving", 96, "正在完成保存并检查重复论文。")
         except Exception as exc:
             self.repository.mark_failed(paper_id, f"{type(exc).__name__}: {exc}")
             raise
@@ -159,20 +227,15 @@ class ResearchService:
         return job
 
     def _run_ingest_job(self, job_id: str, upload_path: Path) -> None:
-        self._report_ingest_job(
-            job_id,
-            status="running",
-            stage="validating",
-            progress=5,
-            message="正在验证 PDF 文件。",
-        )
+        reporter = _IngestProgressReporter(self, job_id)
+        reporter.update("validating", 5, "正在验证 PDF 文件。", status="running")
+        reporter.start_heartbeat()
         try:
             result = self.ingest(
                 upload_path,
-                on_stage=lambda stage, progress: self._report_ingest_job(
-                    job_id, stage=stage, progress=progress, message=_stage_message(stage)
-                ),
+                on_stage=reporter.update,
             )
+            reporter.stop()
             self._report_ingest_job(
                 job_id,
                 status="succeeded",
@@ -184,6 +247,7 @@ class ResearchService:
                 complete=True,
             )
         except Exception as exc:
+            reporter.stop()
             self._report_ingest_job(
                 job_id,
                 status="failed",
@@ -194,6 +258,7 @@ class ResearchService:
                 complete=True,
             )
         finally:
+            reporter.stop()
             upload_path.unlink(missing_ok=True)
 
     def get_ingest_job(self, job_id: str) -> IngestJob:
@@ -204,6 +269,10 @@ class ResearchService:
 
     def list_ingest_jobs(self, *, active_only: bool = True) -> list[IngestJob]:
         return self.repository.list_ingest_jobs(active_only=active_only)
+
+    def list_ingest_job_events(self, job_id: str) -> list[IngestJobEvent]:
+        self.get_ingest_job(job_id)
+        return self.repository.list_ingest_job_events(job_id)
 
     def _report_ingest_job(
         self,
@@ -231,7 +300,11 @@ class ResearchService:
         )
         if message:
             logger.info("Upload %s [%s]: %s", job_id, stage or "update", message)
-            print(f"[Econ Research] upload {job_id}: {message}", flush=True)
+            timestamp = datetime.now(UTC).strftime("%H:%M:%S UTC")
+            print(
+                f"[{timestamp}] [Econ Research] upload {job_id} [{stage or 'update'}]: {message}",
+                flush=True,
+            )
 
     def regenerate_cards(self, paper_id: str) -> CardGeneration:
         paper = self.get_paper(paper_id)

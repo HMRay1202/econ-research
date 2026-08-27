@@ -14,11 +14,11 @@ class LazyDoclingParser:
         self.formula_enrichment = formula_enrichment
         self.paddle_formula_ocr = paddle_formula_ocr
 
-    def parse(self, pdf_path):
+    def parse(self, pdf_path, on_progress=None):
         return DoclingParser(
             formula_enrichment=self.formula_enrichment,
             paddle_formula_ocr=self.paddle_formula_ocr,
-        ).parse(pdf_path)
+        ).parse(pdf_path, on_progress=on_progress)
 
 
 class LazyOpenAIResearchLLM:
