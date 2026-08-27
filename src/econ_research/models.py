@@ -90,6 +90,12 @@ class IngestResult(BaseModel):
     duplicate: bool = False
 
 
+class ReparseResult(BaseModel):
+    paper: Paper
+    chunk_count: int
+    reconnected_card_count: int
+
+
 class SearchResult(BaseModel):
     entity_type: Literal["paper", "chunk", "card"]
     entity_id: str

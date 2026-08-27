@@ -59,15 +59,18 @@ remain compatible.
 
 ## Known limitations and good next changes
 
-- Parsed title ligatures and page provenance need parser improvements.
+- Parser output now preserves source-chunk page ranges and uses a title-page OCR fallback when
+  legacy PDF font mappings damage the title. Dense body text remains Docling-native because
+  full-page OCR can introduce new transcription errors; users should consult the original PDF
+  for verbatim quotations.
 - Cards cannot yet be edited, approved, versioned, or exported as a collection.
 - Global cards can be filtered by paper, type, and claim kind, but tag normalization is deferred.
 - Search is lexical FTS5 rather than semantic search.
 - Deep-read Markdown is displayed as safe plain text rather than rendered HTML.
 - The UI has no user accounts because it is intended for loopback-only use.
 
-Good independent additions are card export, a cross-paper comparison tray, parser provenance
-improvements, and optional semantic search. Keep each behind a service method and additive API so
+Good independent additions are card export, a cross-paper comparison tray, targeted body-text
+normalization with confidence checks, and optional semantic search. Keep each behind a service method and additive API so
 parallel work does not couple to the current frontend implementation.
 
 ## Verification

@@ -133,3 +133,25 @@ def test_usage_tracks_metered_calls(
     assert report.summary.estimated_cost_usd == 0.000088
     assert report.calls is not None
     assert {call.operation for call in report.calls} == {"generate_cards", "deep_read"}
+
+
+def test_reparse_refreshes_provenance_without_calling_llm(
+    service: ResearchService, sample_pdf: Path
+) -> None:
+    imported = service.ingest(sample_pdf)
+    with service.repository.connect() as connection:
+        connection.execute(
+            "UPDATE cards SET page_start = NULL, page_end = NULL, section = NULL"
+        )
+
+    refreshed = service.reparse(imported.paper.id)
+    cards = service.list_cards(paper_id=imported.paper.id)
+
+    assert refreshed.chunk_count == 2
+    assert refreshed.reconnected_card_count == 1
+    assert len(cards) == 1
+    assert cards[0].chunk_id is not None
+    assert cards[0].page_start == 4
+    assert cards[0].page_end == 4
+    assert cards[0].section == "Research Design"
+    assert service.search("parallel trends")

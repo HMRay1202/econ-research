@@ -11,8 +11,14 @@ workflow. Failures mark the paper as failed with a diagnostic message.
 Query the FTS5 index and return ranked paper, card, and source-passage results. Every result
 includes its paper ID and provenance where applicable.
 
+## Reparse
+
+Load the managed original PDF for a ready paper and run the current parser again. Replace only
+the generated Markdown and chunk records, then reconnect cards to their same-ordinal replacement
+chunks and fill missing section/page provenance. This workflow never calls the LLM and never
+modifies the source PDF, cards' generated text, or deep-read reports.
+
 ## Deep read
 
 Load only the selected paper and its stored source chunks, ask the LLM for an economics-specific
 analysis, save the derived report, and return it. Cross-paper context is not included.
-

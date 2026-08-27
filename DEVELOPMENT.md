@@ -46,12 +46,15 @@ requires a PDF and `OPENAI_API_KEY`:
 
 ```bash
 research ingest /absolute/path/to/sample.pdf
+research reparse PAPER_ID
 research search "a term known to occur in the paper"
 research deep-read PAPER_ID
 ```
 
 The first real Docling conversion may download model assets and therefore take longer than
 later ingestions. Keep downloaded models and runtime paper data outside version control.
+Reparsing is local and non-billable: it uses the preserved PDF, refreshes parsed Markdown and
+chunk provenance, and reconnects existing cards without calling the LLM.
 Schema initialization is additive (`CREATE ... IF NOT EXISTS`) so an existing Phase 1 database
 gains new tables without discarding papers. Future incompatible changes require an explicit
 migration rather than database deletion.

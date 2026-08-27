@@ -137,11 +137,26 @@ class SQLiteRepository:
 
             for card in cards:
                 card_id = str(uuid4())
+                source_chunk = (
+                    next(
+                        (
+                            chunk
+                            for chunk in document.chunks
+                            if chunk.ordinal == card.chunk_ordinal
+                        ),
+                        None,
+                    )
+                    if card.chunk_ordinal is not None
+                    else None
+                )
                 chunk_id = (
                     chunk_ids.get(card.chunk_ordinal)
                     if card.chunk_ordinal is not None
                     else None
                 )
+                section = card.section or (source_chunk.section if source_chunk else None)
+                page_start = card.page_start or (source_chunk.page_start if source_chunk else None)
+                page_end = card.page_end or (source_chunk.page_end if source_chunk else None)
                 connection.execute(
                     """INSERT INTO cards
                        (id, paper_id, chunk_id, type, title, content, section, page_start,
@@ -154,9 +169,9 @@ class SQLiteRepository:
                         card.type,
                         card.title,
                         card.content,
-                        card.section,
-                        card.page_start,
-                        card.page_end,
+                        section,
+                        page_start,
+                        page_end,
                         json.dumps(card.tags, ensure_ascii=False),
                         card.claim_kind,
                         timestamp,
@@ -171,9 +186,9 @@ class SQLiteRepository:
                         paper_id,
                         card.title,
                         f"{card.type} {card.claim_kind} {card.content} {' '.join(card.tags)}",
-                        card.section,
-                        card.page_start,
-                        card.page_end,
+                        section,
+                        page_start,
+                        page_end,
                     ),
                 )
 
@@ -208,6 +223,119 @@ class SQLiteRepository:
                 "UPDATE papers SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
                 (error[:2000], utc_now(), paper_id),
             )
+
+    def refresh_parsed_document(
+        self, paper_id: str, markdown_path: str, document: ParsedDocument
+    ) -> int:
+        """Replace derived chunks without calling an LLM and reconnect cards by stable ordinal."""
+        timestamp = utc_now()
+        chunk_ids: dict[int, str] = {}
+        chunk_by_ordinal = {chunk.ordinal: chunk for chunk in document.chunks}
+        with self.connect() as connection:
+            card_sources = {
+                row["id"]: row["ordinal"]
+                for row in connection.execute(
+                    """SELECT cards.id, chunks.ordinal FROM cards
+                       LEFT JOIN chunks ON chunks.id = cards.chunk_id
+                       WHERE cards.paper_id = ?""",
+                    (paper_id,),
+                ).fetchall()
+            }
+            connection.execute("DELETE FROM search_index WHERE paper_id = ?", (paper_id,))
+            connection.execute("DELETE FROM chunks WHERE paper_id = ?", (paper_id,))
+            for chunk in document.chunks:
+                chunk_id = str(uuid4())
+                chunk_ids[chunk.ordinal] = chunk_id
+                connection.execute(
+                    """INSERT INTO chunks
+                       (id, paper_id, ordinal, text, section, page_start, page_end)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        chunk_id,
+                        paper_id,
+                        chunk.ordinal,
+                        chunk.text,
+                        chunk.section,
+                        chunk.page_start,
+                        chunk.page_end,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO search_index
+                       (entity_type, entity_id, paper_id, title, content, section,
+                        page_start, page_end) VALUES ('chunk', ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        chunk_id,
+                        paper_id,
+                        chunk.section or f"Source passage {chunk.ordinal + 1}",
+                        chunk.text,
+                        chunk.section,
+                        chunk.page_start,
+                        chunk.page_end,
+                    ),
+                )
+            reconnected = 0
+            for card_id, ordinal in card_sources.items():
+                chunk = chunk_by_ordinal.get(ordinal) if ordinal is not None else None
+                if chunk is not None:
+                    reconnected += 1
+                connection.execute(
+                    """UPDATE cards SET chunk_id = ?, section = COALESCE(section, ?),
+                       page_start = COALESCE(page_start, ?), page_end = COALESCE(page_end, ?)
+                       WHERE id = ?""",
+                    (
+                        chunk_ids.get(ordinal),
+                        chunk.section if chunk else None,
+                        chunk.page_start if chunk else None,
+                        chunk.page_end if chunk else None,
+                        card_id,
+                    ),
+                )
+            cards = connection.execute(
+                "SELECT * FROM cards WHERE paper_id = ?", (paper_id,)
+            ).fetchall()
+            for card in cards:
+                connection.execute(
+                    """INSERT INTO search_index
+                       (entity_type, entity_id, paper_id, title, content, section,
+                        page_start, page_end) VALUES ('card', ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        card["id"],
+                        paper_id,
+                        card["title"],
+                        (
+                            f"{card['type']} {card['claim_kind']} {card['content']} "
+                            f"{card['tags_json']}"
+                        ),
+                        card["section"],
+                        card["page_start"],
+                        card["page_end"],
+                    ),
+                )
+            connection.execute(
+                """UPDATE papers SET markdown_path = ?, title = ?, authors_json = ?, year = ?,
+                   updated_at = ? WHERE id = ?""",
+                (
+                    markdown_path,
+                    document.title,
+                    json.dumps(document.authors, ensure_ascii=False),
+                    document.year,
+                    timestamp,
+                    paper_id,
+                ),
+            )
+            connection.execute(
+                """INSERT INTO search_index
+                   (entity_type, entity_id, paper_id, title, content, section,
+                    page_start, page_end) VALUES ('paper', ?, ?, ?, ?, NULL, NULL, NULL)""",
+                (
+                    paper_id,
+                    paper_id,
+                    document.title,
+                    " ".join([document.title, *document.authors, str(document.year or "")]),
+                ),
+            )
+        return reconnected
 
     def get_paper(self, paper_id: str) -> Paper | None:
         with self.connect() as connection:

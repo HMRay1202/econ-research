@@ -38,6 +38,7 @@ fallback alias for `OPENAI_DEFAULT_MODEL`.
 
 ```bash
 research ingest /path/to/paper.pdf
+research reparse PAPER_ID
 research search "parallel trends"
 research deep-read PAPER_ID
 research deep-read PAPER_ID --focus identification
@@ -54,6 +55,11 @@ deep reads, and inspect usage. The API documentation remains available at
 On macOS, you can instead double-click `start-research.command` in Finder. It locates the existing
 `econ-research` Conda environment, starts the loopback-only server, and opens the workspace. Keep
 the terminal window open while using the app; close it or press Control-C to stop the server.
+
+`research reparse PAPER_ID` regenerates the stored Markdown and source chunks from the preserved
+original PDF. It is useful after parser improvements: it refreshes paper metadata and page
+provenance, reconnects existing cards by chunk ordinal, and does not call an LLM or regenerate
+cards. Review the refreshed text before relying on it for quotations.
 
 ## Data and privacy
 

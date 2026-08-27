@@ -26,6 +26,10 @@ def test_cli_ingest_search_and_deep_read(
     assert deep_read.exit_code == 0, deep_read.output
     assert "parallel trends" in deep_read.output
 
+    reparse = runner.invoke(cli.app, ["reparse", paper_id])
+    assert reparse.exit_code == 0, reparse.output
+    assert '"reconnected_card_count": 1' in reparse.output
+
     usage = runner.invoke(cli.app, ["usage", "--paper-id", paper_id, "--details"])
     assert usage.exit_code == 0, usage.output
     assert '"call_count": 0' in usage.output

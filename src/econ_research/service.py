@@ -17,6 +17,7 @@ from econ_research.models import (
     Paper,
     ParsedChunk,
     ParsedDocument,
+    ReparseResult,
     ResearchCard,
     SourceChunk,
     UsageReport,
@@ -124,6 +125,25 @@ class ResearchService:
 
     def search(self, query: str, limit: int = 20):
         return self.repository.search(query, limit)
+
+    def reparse(self, paper_id: str) -> ReparseResult:
+        """Refresh derived text and provenance without any LLM call or card regeneration."""
+        paper = self.get_paper(paper_id)
+        if paper.status != "ready":
+            raise PaperNotFoundError(f"Ready paper not found: {paper_id}")
+        pdf_path = self._managed_file(paper.pdf_path, self.originals_dir)
+        document = self.parser.parse(pdf_path)
+        markdown_path = self.parsed_dir / f"{paper_id}.md"
+        markdown_path.write_text(document.markdown, encoding="utf-8")
+        reconnected = self.repository.refresh_parsed_document(
+            paper_id, str(markdown_path), document
+        )
+        refreshed = self.get_paper(paper_id)
+        return ReparseResult(
+            paper=refreshed,
+            chunk_count=len(document.chunks),
+            reconnected_card_count=reconnected,
+        )
 
     def deep_read(self, paper_id: str, focus: str | None = None) -> DeepReadResult:
         paper = self.repository.get_paper(paper_id)

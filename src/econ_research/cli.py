@@ -25,6 +25,17 @@ def ingest(pdf: Path) -> None:
     typer.echo(result.model_dump_json(indent=2))
 
 
+@app.command()
+def reparse(paper_id: str) -> None:
+    """Refresh parsed text and page provenance without calling an LLM."""
+    try:
+        result = build_service().reparse(paper_id)
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(result.model_dump_json(indent=2))
+
+
 @app.command("search")
 def search_command(
     query: str,
