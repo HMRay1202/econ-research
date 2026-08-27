@@ -16,6 +16,11 @@
       }
     </script>
     <link rel="stylesheet" href="/assets/styles.css">
+    <link rel="stylesheet" href="/assets/vendor/katex.min.css">
+    <script src="/assets/vendor/marked.min.js" defer></script>
+    <script src="/assets/vendor/purify.min.js" defer></script>
+    <script src="/assets/vendor/katex.min.js" defer></script>
+    <script src="/assets/vendor/auto-render.min.js" defer></script>
     <script src="/assets/app.js" defer></script>
   </head>
   <body>
@@ -155,7 +160,7 @@
                   <h3 id="report-title">选择一份报告</h3>
                   <a id="report-download" class="text-button" hidden>下载 Markdown</a>
                 </div>
-                <pre id="report-content">历史报告和新生成的报告会显示在这里。</pre>
+                <article id="report-content" class="markdown-content">历史报告和新生成的报告会显示在这里。</article>
               </article>
             </div>
           </section>
@@ -189,7 +194,7 @@
         </div>
         <button id="close-source" class="icon-button" type="button" aria-label="关闭">×</button>
       </div>
-      <pre id="source-content"></pre>
+      <article id="source-content" class="markdown-content"></article>
     </dialog>
   </body>
 </html>

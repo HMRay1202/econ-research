@@ -40,7 +40,16 @@ research = "econ_research.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-econ_research = ["db/*.sql", "web/*.html", "web/*.css", "web/*.js"]
+econ_research = [
+  "db/*.sql",
+  "web/*.html",
+  "web/*.css",
+  "web/*.js",
+  "web/vendor/*.css",
+  "web/vendor/*.js",
+  "web/vendor/*.md",
+  "web/vendor/fonts/*.woff2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

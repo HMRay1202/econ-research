@@ -13,6 +13,98 @@ const state = {
 
 const byId = (id) => document.getElementById(id);
 
+const markdownRenderer = new marked.Renderer();
+markdownRenderer.html = () => "";
+
+const markdownSanitizerOptions = {
+  ALLOWED_TAGS: [
+    "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "li", "ol", "p", "pre", "s", "strong", "table", "tbody", "td", "th", "thead",
+    "tr", "ul",
+  ],
+  ALLOWED_ATTR: ["href", "title"],
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i,
+};
+
+const mathDelimiterPlaceholders = {
+  displayOpen: "\uE000econ-research-display-open\uE001",
+  displayClose: "\uE000econ-research-display-close\uE001",
+  inlineOpen: "\uE000econ-research-inline-open\uE001",
+  inlineClose: "\uE000econ-research-inline-close\uE001",
+};
+
+function preserveMathDelimiters(markdown) {
+  return markdown
+    .replaceAll("\\[", mathDelimiterPlaceholders.displayOpen)
+    .replaceAll("\\]", mathDelimiterPlaceholders.displayClose)
+    .replaceAll("\\(", mathDelimiterPlaceholders.inlineOpen)
+    .replaceAll("\\)", mathDelimiterPlaceholders.inlineClose);
+}
+
+function restoreMathDelimiters(html) {
+  return html
+    .replaceAll(mathDelimiterPlaceholders.displayOpen, "\\[")
+    .replaceAll(mathDelimiterPlaceholders.displayClose, "\\]")
+    .replaceAll(mathDelimiterPlaceholders.inlineOpen, "\\(")
+    .replaceAll(mathDelimiterPlaceholders.inlineClose, "\\)");
+}
+
+DOMPurify.addHook("afterSanitizeAttributes", (element) => {
+  if (element.tagName === "A" && element.hasAttribute("href")) {
+    element.setAttribute("target", "_blank");
+    element.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
+function linkChunkReferences(container) {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  for (const textNode of textNodes) {
+    if (textNode.parentElement?.closest("a, code, pre")) continue;
+    const parts = textNode.textContent.split(/(\[chunk\s+\d+\])/gi);
+    if (parts.length === 1) continue;
+    const fragment = document.createDocumentFragment();
+    for (const part of parts) {
+      const match = /^\[chunk\s+(\d+)\]$/i.exec(part);
+      const ordinal = match ? Number(match[1]) : null;
+      if (ordinal !== null && state.chunks.has(ordinal)) {
+        const button = node("button", "chunk-reference", part);
+        button.type = "button";
+        button.addEventListener("click", () => showSource(ordinal));
+        fragment.append(button);
+      } else {
+        fragment.append(document.createTextNode(part));
+      }
+    }
+    textNode.replaceWith(fragment);
+  }
+}
+
+function renderMarkdown(container, markdown) {
+  const unsafeHtml = marked.parse(preserveMathDelimiters(markdown), {
+    gfm: true,
+    breaks: false,
+    renderer: markdownRenderer,
+  });
+  const safeHtml = restoreMathDelimiters(DOMPurify.sanitize(unsafeHtml, markdownSanitizerOptions));
+  const fragment = document.createRange().createContextualFragment(safeHtml);
+  container.replaceChildren(fragment);
+  linkChunkReferences(container);
+  renderMathInElement(container, {
+    delimiters: [
+      { left: "$$", right: "$$", display: true },
+      { left: "\\[", right: "\\]", display: true },
+      { left: "$", right: "$", display: false },
+      { left: "\\(", right: "\\)", display: false },
+    ],
+    ignoredTags: ["code", "option", "pre", "script", "style", "textarea"],
+    strict: "warn",
+    throwOnError: false,
+    trust: false,
+  });
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   if (!response.ok) {
@@ -294,7 +386,7 @@ function showSource(ordinal) {
   const chunk = state.chunks.get(ordinal);
   if (!chunk) return;
   byId("source-title").textContent = chunk.section || `Chunk ${ordinal}`;
-  byId("source-content").textContent = chunk.text;
+  renderMarkdown(byId("source-content"), chunk.text);
   byId("source-dialog").showModal();
 }
 
@@ -321,7 +413,7 @@ async function openReport(reportId) {
   try {
     const report = await api(`/api/deep-reads/${reportId}`);
     byId("report-title").textContent = report.focus || "综合深读";
-    byId("report-content").textContent = report.report;
+    renderMarkdown(byId("report-content"), report.report);
     const download = byId("report-download");
     download.href = `/api/deep-reads/${report.id}/download`;
     download.hidden = false;
@@ -546,7 +638,7 @@ async function generateDeepRead(event) {
       body: JSON.stringify({ focus }),
     });
     byId("report-title").textContent = report.focus || "综合深读";
-    byId("report-content").textContent = report.report;
+    renderMarkdown(byId("report-content"), report.report);
     byId("report-download").href = `/api/deep-reads/${report.id}/download`;
     byId("report-download").hidden = false;
     await Promise.all([selectPaper(state.selectedPaper.id), refreshHeader(), loadGlobalUsage()]);

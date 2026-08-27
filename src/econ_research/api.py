@@ -35,7 +35,7 @@ from econ_research.service import (
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 WEB_DIR = Path(__file__).with_name("web")
-WEB_UI_VERSION = "2026-08-27-upload-events-v1"
+WEB_UI_VERSION = "2026-08-27-markdown-math-v1"
 
 
 class DeepReadRequest(BaseModel):
