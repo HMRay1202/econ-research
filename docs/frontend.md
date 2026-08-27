@@ -22,7 +22,8 @@ console remains available at `http://127.0.0.1:8000/docs`.
 src/econ_research/web/
 ├── index.html   # stable page regions and accessible controls
 ├── styles.css   # responsive presentation; no generated CSS
-└── app.js       # API client, local view state, and DOM rendering
+├── app.js       # API client, local view state, and DOM rendering
+└── vendor/       # fixed-version Marked, DOMPurify, KaTeX, fonts, and license notices
 ```
 
 `api.py` serves `index.html` at `/` and mounts the directory at `/assets`. `pyproject.toml`
@@ -61,6 +62,24 @@ not require a CDN, Node build, or network connection. KaTeX uses `throwOnError: 
 untrusted formula commands cannot opt into privileged output. Before Markdown parsing, the helper
 temporarily preserves `\\[...\\]` and `\\(...\\)` delimiters because ordinary Markdown would otherwise
 treat their backslashes as escapes before KaTeX sees them.
+
+### Markdown and mathematics rendering
+
+Rendering is presentation-only and applies only to a displayed deep-read report and to the source
+chunk dialog. Card titles/content and other UI strings continue to use `textContent`. The renderer
+accepts GitHub-flavored Markdown and recognizes `$...$`, `$$...$$`, `\\(...\\)`, and `\\[...\\]` LaTeX
+delimiters. Display equations can scroll horizontally on narrow screens rather than changing the
+stored source text.
+
+After sanitization and before mathematics rendering, a report reference in the form `[chunk N]`
+becomes a button only when chunk `N` belongs to the paper currently loaded in the browser. Selecting
+it opens that stored source chunk. References inside links, inline code, or code blocks remain plain
+text. This is a client-side convenience only; it neither changes deep-read Markdown nor adds a
+route or persistence contract.
+
+The asset versions and license notices are recorded in `web/vendor/THIRD_PARTY_NOTICES.md`. Keep
+these assets local and versioned together; do not replace them with a CDN URL or introduce a Node
+build solely for Markdown rendering.
 
 Upload jobs are server-side records. On page load, the client requests `GET /api/uploads` and
 resumes polling queued or running jobs, so refreshing during parsing restores the visible backend

@@ -18,6 +18,9 @@ and persistence must remain in `SQLiteRepository`.
 - Search one local library through CLI and documented `/api/*` routes.
 - Produce on-demand Terra deep reads with stored report history and measured usage telemetry.
 - Browse papers, cards, chunks, searches, managed files, deep reads, and usage in the local UI.
+- Render deep reads and inspected source chunks as sanitized local Markdown with local KaTeX;
+  source Markdown and API responses remain unchanged, while valid `[chunk N]` report references
+  open the corresponding stored chunk.
 - Reparse a ready paper with `research reparse PAPER_ID`. This refreshes generated Markdown,
   title-page metadata, chunks, and page/section provenance without calling an LLM; cards are
   reconnected by their prior chunk ordinal.
