@@ -6,6 +6,8 @@ setopt no_bg_nice
 PROJECT_DIR="${0:A:h}"
 APP_URL="http://127.0.0.1:8000/"
 HEALTH_URL="${APP_URL}health"
+UI_VERSION="2026-08-27-formula-v2"
+UI_VERSION_URL="${APP_URL}api/ui-version"
 
 cd "$PROJECT_DIR"
 
@@ -42,9 +44,14 @@ open_workspace() {
 }
 
 if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
-  print "Econ Research 已在运行：$APP_URL"
-  open_workspace
-  exit 0
+  if curl -fsS "$UI_VERSION_URL" 2>/dev/null | grep -Fq "${UI_VERSION}"; then
+    print "Econ Research 已在运行：$APP_URL"
+    open_workspace
+    exit 0
+  fi
+  print -u2 "8000 端口已有旧版或其他服务，无法安全打开当前界面。"
+  print -u2 "请在运行旧服务的终端按 Control-C 停止它，然后再次双击本启动脚本。"
+  exit 1
 fi
 
 if ! conda_binary="$(find_conda)"; then

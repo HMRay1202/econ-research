@@ -10,10 +10,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from econ_research.models import (
+    CardGeneration,
     CardType,
     ClaimKind,
     DeepReadResult,
     DeepReadSummary,
+    IngestJob,
     LLMCall,
     LLMCallMetrics,
     Paper,
@@ -54,6 +56,51 @@ class SQLiteRepository:
         schema = files("econ_research.db").joinpath("schema.sql").read_text(encoding="utf-8")
         with self.connect() as connection:
             connection.executescript(schema)
+            # SQLite cannot add a column through CREATE TABLE IF NOT EXISTS. Keep migrations
+            # additive so existing local libraries are upgraded in place.
+            self._add_column_if_missing(
+                connection, "papers", "card_status TEXT NOT NULL DEFAULT 'pending'"
+            )
+            self._add_column_if_missing(connection, "papers", "doi TEXT")
+            self._add_column_if_missing(connection, "papers", "normalized_text_sha256 TEXT")
+            self._add_column_if_missing(connection, "papers", "archived_at TEXT")
+            self._add_column_if_missing(
+                connection, "papers", "title_source TEXT NOT NULL DEFAULT 'parser'"
+            )
+            self._add_column_if_missing(
+                connection, "papers", "year_source TEXT NOT NULL DEFAULT 'parser'"
+            )
+            self._add_column_if_missing(
+                connection, "papers", "formula_detected INTEGER NOT NULL DEFAULT 0"
+            )
+            self._add_column_if_missing(
+                connection, "papers", "formula_recognized INTEGER NOT NULL DEFAULT 0"
+            )
+            self._add_column_if_missing(
+                connection, "papers", "formula_fallback INTEGER NOT NULL DEFAULT 0"
+            )
+            self._add_column_if_missing(
+                connection, "papers", "formula_status TEXT NOT NULL DEFAULT 'not_run'"
+            )
+            self._add_column_if_missing(connection, "papers", "formula_error TEXT")
+            self._add_column_if_missing(connection, "cards", "generation_id TEXT")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(doi)")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_papers_normalized_text "
+                "ON papers(normalized_text_sha256)"
+            )
+            connection.execute(
+                "UPDATE papers SET card_status = CASE WHEN EXISTS "
+                "(SELECT 1 FROM cards WHERE cards.paper_id = papers.id) THEN 'ready' "
+                "ELSE card_status END"
+            )
+
+    @staticmethod
+    def _add_column_if_missing(connection: sqlite3.Connection, table: str, definition: str) -> None:
+        column = definition.split()[0]
+        existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
 
     def find_by_sha256(self, sha256: str) -> Paper | None:
         with self.connect() as connection:
@@ -70,6 +117,12 @@ class SQLiteRepository:
                    (id, sha256, source_filename, pdf_path, status, created_at, updated_at)
                    VALUES (?, ?, ?, ?, 'processing', ?, ?)""",
                 (paper_id, sha256, source_filename, pdf_path, timestamp, timestamp),
+            )
+            connection.execute(
+                """INSERT INTO paper_sources
+                   (id, paper_id, sha256, source_filename, pdf_path, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (str(uuid4()), paper_id, sha256, source_filename, pdf_path, timestamp),
             )
         paper = self.get_paper(paper_id)
         assert paper is not None
@@ -139,20 +192,14 @@ class SQLiteRepository:
                 card_id = str(uuid4())
                 source_chunk = (
                     next(
-                        (
-                            chunk
-                            for chunk in document.chunks
-                            if chunk.ordinal == card.chunk_ordinal
-                        ),
+                        (chunk for chunk in document.chunks if chunk.ordinal == card.chunk_ordinal),
                         None,
                     )
                     if card.chunk_ordinal is not None
                     else None
                 )
                 chunk_id = (
-                    chunk_ids.get(card.chunk_ordinal)
-                    if card.chunk_ordinal is not None
-                    else None
+                    chunk_ids.get(card.chunk_ordinal) if card.chunk_ordinal is not None else None
                 )
                 section = card.section or (source_chunk.section if source_chunk else None)
                 page_start = card.page_start or (source_chunk.page_start if source_chunk else None)
@@ -193,13 +240,23 @@ class SQLiteRepository:
                 )
 
             connection.execute(
-                """UPDATE papers SET markdown_path = ?, title = ?, authors_json = ?, year = ?,
-                   status = 'ready', error = NULL, updated_at = ? WHERE id = ?""",
+                """UPDATE papers SET markdown_path = ?, title = ?, title_source = 'parser',
+                   authors_json = ?, year = ?, year_source = 'parser',
+                   formula_detected = ?, formula_recognized = ?, formula_fallback = ?,
+                   formula_status = ?, formula_error = ?, status = 'ready',
+                   card_status = ?, error = NULL,
+                   updated_at = ? WHERE id = ?""",
                 (
                     markdown_path,
                     document.title,
                     json.dumps(document.authors, ensure_ascii=False),
                     document.year,
+                    document.formula_detected,
+                    document.formula_recognized,
+                    document.formula_fallback,
+                    document.formula_status,
+                    document.formula_error,
+                    "ready" if cards else "pending",
                     timestamp,
                     paper_id,
                 ),
@@ -216,6 +273,195 @@ class SQLiteRepository:
                 ),
             )
         return len(document.chunks), len(cards)
+
+    def create_ingest_job(self, source_filename: str, upload_path: str) -> IngestJob:
+        job = IngestJob(
+            id=str(uuid4()),
+            source_filename=source_filename,
+            status="queued",
+            stage="queued",
+            progress=0,
+            created_at=utc_now(),
+        )
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO ingest_jobs
+                   (id, source_filename, upload_path, status, stage, progress, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job.id,
+                    job.source_filename,
+                    upload_path,
+                    job.status,
+                    job.stage,
+                    job.progress,
+                    job.created_at,
+                ),
+            )
+        return job
+
+    def get_ingest_job(self, job_id: str) -> IngestJob | None:
+        with self.connect() as connection:
+            row = connection.execute("SELECT * FROM ingest_jobs WHERE id = ?", (job_id,)).fetchone()
+        return IngestJob(**dict(row)) if row else None
+
+    def update_ingest_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        stage: str | None = None,
+        progress: int | None = None,
+        paper_id: str | None = None,
+        duplicate_of: str | None = None,
+        error: str | None = None,
+        complete: bool = False,
+    ) -> None:
+        updates: list[str] = []
+        values: list[object] = []
+        for column, value in (
+            ("status", status),
+            ("stage", stage),
+            ("progress", progress),
+            ("paper_id", paper_id),
+            ("duplicate_of", duplicate_of),
+            ("error", error),
+        ):
+            if value is not None:
+                updates.append(f"{column} = ?")
+                values.append(value)
+        if status == "running":
+            updates.append("started_at = COALESCE(started_at, ?)")
+            values.append(utc_now())
+        if complete:
+            updates.append("completed_at = ?")
+            values.append(utc_now())
+        if not updates:
+            return
+        values.append(job_id)
+        with self.connect() as connection:
+            connection.execute(f"UPDATE ingest_jobs SET {', '.join(updates)} WHERE id = ?", values)
+
+    def interrupt_running_jobs(self) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE ingest_jobs SET status = 'interrupted', stage = 'interrupted',
+                   error = COALESCE(error, 'The local service stopped before this task completed'),
+                   completed_at = ? WHERE status = 'running'""",
+                (utc_now(),),
+            )
+
+    def recover_orphaned_processing_papers(self) -> None:
+        """Make an upload interrupted by a process exit retryable on the next start."""
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE papers SET status = 'failed',
+                   error = COALESCE(error, 'The local service stopped before parsing completed'),
+                   updated_at = ? WHERE status = 'processing'""",
+                (utc_now(),),
+            )
+
+    def create_card_generation(self, paper_id: str) -> CardGeneration:
+        generation = CardGeneration(
+            id=str(uuid4()), paper_id=paper_id, status="running", created_at=utc_now()
+        )
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO card_generations (id, paper_id, status, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (generation.id, paper_id, generation.status, generation.created_at),
+            )
+            connection.execute(
+                "UPDATE papers SET card_status = 'generating' WHERE id = ?", (paper_id,)
+            )
+        return generation
+
+    def finish_card_generation(
+        self, generation_id: str, *, card_count: int = 0, error: str | None = None
+    ) -> None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT paper_id FROM card_generations WHERE id = ?", (generation_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError(f"Card generation not found: {generation_id}")
+            status = "failed" if error else "succeeded"
+            connection.execute(
+                """UPDATE card_generations
+                   SET status = ?, card_count = ?, error = ?, completed_at = ?
+                   WHERE id = ?""",
+                (status, card_count, error, utc_now(), generation_id),
+            )
+            connection.execute(
+                "UPDATE papers SET card_status = ? WHERE id = ?",
+                ("failed" if error else "ready", row["paper_id"]),
+            )
+
+    def replace_cards(
+        self, paper_id: str, generation_id: str, cards: list[ResearchCardDraft]
+    ) -> int:
+        chunks = {row["ordinal"]: dict(row) for row in self.get_chunks(paper_id)}
+        invalid = [
+            card.chunk_ordinal
+            for card in cards
+            if card.chunk_ordinal is not None and card.chunk_ordinal not in chunks
+        ]
+        if invalid:
+            raise ValueError(f"LLM cards reference unknown source chunks: {sorted(set(invalid))}")
+        timestamp = utc_now()
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM search_index WHERE paper_id = ? AND entity_type = 'card'", (paper_id,)
+            )
+            connection.execute("DELETE FROM cards WHERE paper_id = ?", (paper_id,))
+            for card in cards:
+                source = chunks.get(card.chunk_ordinal) if card.chunk_ordinal is not None else None
+                card_id = str(uuid4())
+                section = card.section or (source["section"] if source else None)
+                page_start = card.page_start or (source["page_start"] if source else None)
+                page_end = card.page_end or (source["page_end"] if source else None)
+                connection.execute(
+                    """INSERT INTO cards (id, paper_id, chunk_id, type, title, content, section,
+                       page_start, page_end, tags_json, claim_kind, generation_id, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        card_id,
+                        paper_id,
+                        source["id"] if source else None,
+                        card.type,
+                        card.title,
+                        card.content,
+                        section,
+                        page_start,
+                        page_end,
+                        json.dumps(card.tags, ensure_ascii=False),
+                        card.claim_kind,
+                        generation_id,
+                        timestamp,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO search_index (entity_type, entity_id, paper_id, title, content,
+                       section, page_start, page_end) VALUES ('card', ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        card_id,
+                        paper_id,
+                        card.title,
+                        f"{card.type} {card.claim_kind} {card.content} {' '.join(card.tags)}",
+                        section,
+                        page_start,
+                        page_end,
+                    ),
+                )
+        return len(cards)
+
+    def list_card_generations(self, paper_id: str) -> list[CardGeneration]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM card_generations WHERE paper_id = ? ORDER BY created_at DESC",
+                (paper_id,),
+            ).fetchall()
+        return [CardGeneration(**dict(row)) for row in rows]
 
     def mark_failed(self, paper_id: str, error: str) -> None:
         with self.connect() as connection:
@@ -313,13 +559,22 @@ class SQLiteRepository:
                     ),
                 )
             connection.execute(
-                """UPDATE papers SET markdown_path = ?, title = ?, authors_json = ?, year = ?,
+                """UPDATE papers SET markdown_path = ?,
+                   title = CASE WHEN title_source = 'manual' THEN title ELSE ? END,
+                   authors_json = ?, year = CASE WHEN year_source = 'manual' THEN year ELSE ? END,
+                   formula_detected = ?, formula_recognized = ?, formula_fallback = ?,
+                   formula_status = ?, formula_error = ?,
                    updated_at = ? WHERE id = ?""",
                 (
                     markdown_path,
                     document.title,
                     json.dumps(document.authors, ensure_ascii=False),
                     document.year,
+                    document.formula_detected,
+                    document.formula_recognized,
+                    document.formula_fallback,
+                    document.formula_status,
+                    document.formula_error,
                     timestamp,
                     paper_id,
                 ),
@@ -328,24 +583,133 @@ class SQLiteRepository:
                 """INSERT INTO search_index
                    (entity_type, entity_id, paper_id, title, content, section,
                     page_start, page_end) VALUES ('paper', ?, ?, ?, ?, NULL, NULL, NULL)""",
-                (
-                    paper_id,
-                    paper_id,
-                    document.title,
-                    " ".join([document.title, *document.authors, str(document.year or "")]),
-                ),
+                self._paper_search_values(connection, paper_id),
             )
         return reconnected
+
+    @staticmethod
+    def _paper_search_values(connection: sqlite3.Connection, paper_id: str) -> tuple[str, ...]:
+        row = connection.execute(
+            "SELECT title, authors_json, year FROM papers WHERE id = ?", (paper_id,)
+        ).fetchone()
+        assert row is not None
+        title = str(row["title"] or "")
+        authors = json.loads(row["authors_json"])
+        return (paper_id, paper_id, title, " ".join([title, *authors, str(row["year"] or "")]))
 
     def get_paper(self, paper_id: str) -> Paper | None:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
         return self._paper_from_row(row) if row else None
 
-    def list_papers(self) -> list[Paper]:
+    def list_papers(self, *, include_archived: bool = False) -> list[Paper]:
         with self.connect() as connection:
-            rows = connection.execute("SELECT * FROM papers ORDER BY created_at DESC").fetchall()
+            rows = connection.execute(
+                "SELECT * FROM papers"
+                + ("" if include_archived else " WHERE archived_at IS NULL")
+                + " ORDER BY created_at DESC"
+            ).fetchall()
         return [self._paper_from_row(row) for row in rows]
+
+    def set_archived(self, paper_id: str, archived: bool) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE papers SET archived_at = ?, updated_at = ? WHERE id = ?",
+                (utc_now() if archived else None, utc_now(), paper_id),
+            )
+
+    def update_paper_metadata(
+        self,
+        paper_id: str,
+        *,
+        title: str | None = None,
+        update_title: bool = False,
+        year: int | None = None,
+        update_year: bool = False,
+    ) -> Paper | None:
+        with self.connect() as connection:
+            assignments = ["updated_at = ?"]
+            values: list[object] = [utc_now()]
+            if update_title:
+                assignments.extend(["title = ?", "title_source = 'manual'"])
+                values.append(title)
+            if update_year:
+                assignments.extend(["year = ?", "year_source = 'manual'"])
+                values.append(year)
+            values.append(paper_id)
+            connection.execute(
+                f"UPDATE papers SET {', '.join(assignments)} WHERE id = ?", values
+            )
+            row = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
+            if not row:
+                return None
+            connection.execute(
+                "DELETE FROM search_index WHERE paper_id = ? AND entity_type = 'paper'", (paper_id,)
+            )
+            connection.execute(
+                """INSERT INTO search_index (entity_type, entity_id, paper_id, title, content,
+                   section, page_start, page_end) VALUES ('paper', ?, ?, ?, ?, NULL, NULL, NULL)""",
+                self._paper_search_values(connection, paper_id),
+            )
+        return self._paper_from_row(row)
+
+    def paper_deletion_paths(self, paper_id: str) -> tuple[list[str], list[str]]:
+        """Return all associated source/report paths before a destructive operation."""
+        with self.connect() as connection:
+            paper = connection.execute("SELECT * FROM papers WHERE id = ?", (paper_id,)).fetchone()
+            if not paper:
+                raise ValueError(f"Paper not found: {paper_id}")
+            source_rows = connection.execute(
+                "SELECT pdf_path FROM paper_sources WHERE paper_id = ?", (paper_id,)
+            ).fetchall()
+            source_paths = [paper["pdf_path"], *(row["pdf_path"] for row in source_rows)]
+            deep_read_ids = [
+                row["id"]
+                for row in connection.execute(
+                    "SELECT id FROM deep_reads WHERE paper_id = ?", (paper_id,)
+                ).fetchall()
+            ]
+        return list(dict.fromkeys(source_paths)), deep_read_ids
+
+    def delete_paper(self, paper_id: str) -> None:
+        with self.connect() as connection:
+            exists = connection.execute("SELECT 1 FROM papers WHERE id = ?", (paper_id,)).fetchone()
+            if not exists:
+                raise ValueError(f"Paper not found: {paper_id}")
+            connection.execute("DELETE FROM search_index WHERE paper_id = ?", (paper_id,))
+            connection.execute("DELETE FROM papers WHERE id = ?", (paper_id,))
+
+    def find_possible_duplicate(
+        self, *, doi: str | None, normalized_text_sha256: str | None, title: str
+    ) -> Paper | None:
+        with self.connect() as connection:
+            if doi:
+                row = connection.execute(
+                    """SELECT * FROM papers WHERE lower(doi) = lower(?)
+                       AND archived_at IS NULL LIMIT 1""",
+                    (doi,),
+                ).fetchone()
+                if row:
+                    return self._paper_from_row(row)
+            if normalized_text_sha256:
+                row = connection.execute(
+                    """SELECT * FROM papers WHERE normalized_text_sha256 = ?
+                       AND archived_at IS NULL LIMIT 1""",
+                    (normalized_text_sha256,),
+                ).fetchone()
+                if row:
+                    return self._paper_from_row(row)
+        return None
+
+    def update_document_identity(
+        self, paper_id: str, *, doi: str | None, normalized_text_sha256: str
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE papers SET doi = ?, normalized_text_sha256 = ?, updated_at = ?
+                   WHERE id = ?""",
+                (doi, normalized_text_sha256, utc_now(), paper_id),
+            )
 
     def get_chunks(self, paper_id: str) -> list[dict[str, object]]:
         with self.connect() as connection:
@@ -528,9 +892,7 @@ class SQLiteRepository:
         summary_values["average_duration_ms"] = round(
             float(summary_values["average_duration_ms"]), 2
         )
-        summary_values["estimated_cost_usd"] = round(
-            float(summary_values["estimated_cost_usd"]), 8
-        )
+        summary_values["estimated_cost_usd"] = round(float(summary_values["estimated_cost_usd"]), 8)
         return UsageReport(
             summary=UsageSummary(**summary_values),
             calls=[LLMCall(**dict(call_row)) for call_row in rows] if include_calls else None,

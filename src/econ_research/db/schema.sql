@@ -7,9 +7,20 @@ CREATE TABLE IF NOT EXISTS papers (
     pdf_path TEXT NOT NULL,
     markdown_path TEXT,
     title TEXT,
+    title_source TEXT NOT NULL DEFAULT 'parser',
     authors_json TEXT NOT NULL DEFAULT '[]',
     year INTEGER,
+    year_source TEXT NOT NULL DEFAULT 'parser',
+    formula_detected INTEGER NOT NULL DEFAULT 0,
+    formula_recognized INTEGER NOT NULL DEFAULT 0,
+    formula_fallback INTEGER NOT NULL DEFAULT 0,
+    formula_status TEXT NOT NULL DEFAULT 'not_run',
+    formula_error TEXT,
     status TEXT NOT NULL CHECK (status IN ('processing', 'ready', 'failed')),
+    card_status TEXT NOT NULL DEFAULT 'pending',
+    doi TEXT,
+    normalized_text_sha256 TEXT,
+    archived_at TEXT,
     error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -38,7 +49,45 @@ CREATE TABLE IF NOT EXISTS cards (
     page_end INTEGER,
     tags_json TEXT NOT NULL DEFAULT '[]',
     claim_kind TEXT NOT NULL,
+    generation_id TEXT,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_sources (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    sha256 TEXT NOT NULL UNIQUE,
+    source_filename TEXT NOT NULL,
+    pdf_path TEXT NOT NULL,
+    normalized_text_sha256 TEXT,
+    doi TEXT,
+    created_at TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS ingest_jobs (
+    id TEXT PRIMARY KEY,
+    source_filename TEXT NOT NULL,
+    upload_path TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'interrupted')),
+    stage TEXT NOT NULL,
+    progress INTEGER NOT NULL DEFAULT 0,
+    paper_id TEXT REFERENCES papers(id) ON DELETE SET NULL,
+    duplicate_of TEXT REFERENCES papers(id) ON DELETE SET NULL,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS card_generations (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+    card_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS deep_reads (
@@ -79,6 +128,9 @@ CREATE INDEX IF NOT EXISTS idx_cards_paper ON cards(paper_id);
 CREATE INDEX IF NOT EXISTS idx_deep_reads_paper ON deep_reads(paper_id);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_paper ON llm_calls(paper_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_operation ON llm_calls(operation, started_at);
+CREATE INDEX IF NOT EXISTS idx_paper_sources_paper ON paper_sources(paper_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created ON ingest_jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_card_generations_paper ON card_generations(paper_id, created_at);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     entity_type UNINDEXED,

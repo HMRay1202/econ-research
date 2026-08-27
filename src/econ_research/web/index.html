@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="本地优先的经济学论文研究工作台">
     <title>Econ Research · 本地研究工作台</title>
+    <script>
+      if (window.location.protocol === "file:") {
+        window.addEventListener("DOMContentLoaded", () => {
+          document.body.replaceChildren(Object.assign(document.createElement("main"), {
+            className: "empty-state",
+            textContent: "此 HTML 文件不能直接打开。请双击项目根目录的 start-research.command，或访问 http://127.0.0.1:8000/。",
+          }));
+        });
+      }
+    </script>
     <link rel="stylesheet" href="/assets/styles.css">
     <script src="/assets/app.js" defer></script>
   </head>
@@ -37,16 +47,17 @@
       <aside class="library-panel">
         <section class="upload-card">
           <h2>导入论文</h2>
-          <p>导入会自动解析 PDF，并调用 Luna 生成研究卡片。</p>
+          <p>可一次选择多个 PDF。上传后会进入本地队列，卡片失败可单独重试。</p>
           <form id="upload-form">
             <label class="file-picker" for="pdf-file">
               <span>选择 PDF</span>
-              <input id="pdf-file" name="file" type="file" accept="application/pdf,.pdf"
+              <input id="pdf-file" name="file" type="file" accept="application/pdf,.pdf" multiple
                      required>
             </label>
             <p id="selected-file" class="muted">尚未选择文件</p>
-            <button id="upload-button" type="submit" class="primary wide">导入并生成卡片</button>
+            <button id="upload-button" type="submit" class="primary wide">加入导入队列</button>
           </form>
+          <div id="upload-jobs" class="upload-jobs" aria-live="polite"></div>
         </section>
 
         <section class="paper-library">
@@ -54,11 +65,23 @@
             <h2>论文库</h2>
             <button id="refresh-papers" class="text-button" type="button">刷新</button>
           </div>
+          <label class="muted"><input id="include-archived" type="checkbox"> 显示已归档</label>
           <div id="paper-list" class="paper-list" aria-live="polite"></div>
         </section>
       </aside>
 
       <section class="content-panel">
+        <section class="global-usage-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">LIBRARY ACTIVITY</p>
+              <h2>全局调用历史</h2>
+            </div>
+            <button id="refresh-global-usage" class="text-button" type="button">刷新</button>
+          </div>
+          <div id="global-usage-summary" class="usage-cards"></div>
+          <div id="global-usage-calls" class="usage-table-wrap"></div>
+        </section>
         <section id="welcome-panel" class="empty-state">
           <p class="eyebrow">READY WHEN YOU ARE</p>
           <h2>选择一篇论文开始研究</h2>
@@ -75,6 +98,12 @@
             <div class="file-actions">
               <a id="original-link" class="secondary-button" target="_blank">打开原始 PDF</a>
               <a id="parsed-link" class="secondary-button">下载解析文本</a>
+              <button id="edit-paper-title" class="secondary-button" type="button">修改标题</button>
+              <button id="edit-paper-year" class="secondary-button" type="button">修改年份</button>
+              <button id="reparse-paper" class="secondary-button" type="button">重新解析公式</button>
+              <button id="regenerate-cards" class="secondary-button" type="button">重新生成卡片</button>
+              <button id="archive-paper" class="text-button" type="button">移除论文（可恢复）</button>
+              <button id="delete-paper" class="text-button danger-button" type="button">永久删除…</button>
             </div>
           </section>
 

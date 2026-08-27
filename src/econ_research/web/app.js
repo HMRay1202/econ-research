@@ -7,6 +7,7 @@ const state = {
   chunks: new Map(),
   deepReads: [],
   usage: null,
+  uploadJobs: new Map(),
 };
 
 const byId = (id) => document.getElementById(id);
@@ -31,6 +32,67 @@ function showError(error) {
   banner.textContent = error instanceof Error ? error.message : String(error);
   banner.hidden = false;
   window.setTimeout(() => { banner.hidden = true; }, 7000);
+}
+
+function renderUploadJobs() {
+  const list = byId("upload-jobs");
+  list.replaceChildren();
+  for (const job of state.uploadJobs.values()) {
+    const row = node("div", "upload-job");
+    const label = node("span", "", `${job.source_filename} · ${job.stage}`);
+    const progress = document.createElement("progress");
+    progress.max = 100;
+    progress.value = job.progress;
+    const detail = node("small", "muted", `${job.progress}%${job.error ? ` · ${job.error}` : ""}`);
+    row.append(label, progress, detail);
+    list.append(row);
+  }
+}
+
+function uploadWithProgress(file) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    const form = new FormData();
+    form.append("file", file);
+    request.open("POST", "/api/uploads");
+    request.responseType = "json";
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      state.uploadJobs.set(`local:${file.name}`, {
+        source_filename: file.name, stage: "uploading", progress: Math.round(event.loaded / event.total * 20),
+      });
+      renderUploadJobs();
+    };
+    request.onerror = () => reject(new Error("上传连接中断，请检查本地服务终端。"));
+    request.onload = () => {
+      const body = request.response || {};
+      if (request.status >= 200 && request.status < 300) resolve(body);
+      else reject(new Error(body.detail || `${request.status} ${request.statusText}`));
+    };
+    request.send(form);
+  });
+}
+
+async function watchUpload(job) {
+  state.uploadJobs.delete(`local:${job.source_filename}`);
+  state.uploadJobs.set(job.id, job);
+  renderUploadJobs();
+  while (["queued", "running"].includes(job.status)) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    job = await api(`/api/uploads/${job.id}`);
+    state.uploadJobs.set(job.id, job);
+    renderUploadJobs();
+  }
+  if (job.status === "succeeded") {
+    await Promise.all([loadPapers(job.paper_id), refreshHeader(), loadGlobalUsage()]);
+    if (job.duplicate_of) {
+      byId("selected-file").textContent = job.paper_id === job.duplicate_of
+        ? "文件已存在，已打开原有论文。"
+        : "已导入；系统发现可能是已有论文的另一份版本，请在论文库中核对。";
+    }
+  } else if (job.status !== "interrupted") {
+    showError(`${job.source_filename}: ${job.error || "导入失败"}`);
+  }
 }
 
 function node(tag, className, text) {
@@ -64,7 +126,8 @@ async function refreshHeader() {
 
 async function loadPapers(selectId = null) {
   try {
-    state.papers = await api("/api/papers");
+    const includeArchived = byId("include-archived")?.checked;
+    state.papers = await api(`/api/papers?include_archived=${includeArchived ? "true" : "false"}`);
     byId("paper-total").textContent = state.papers.length;
     renderPaperList();
     const target = selectId || state.selectedPaper?.id || state.papers[0]?.id;
@@ -103,8 +166,15 @@ async function selectPaper(paperId) {
   byId("paper-workspace").hidden = false;
   byId("paper-title").textContent = paper.title || paper.source_filename;
   byId("paper-status").textContent = `${paper.status.toUpperCase()} · ${paper.source_filename}`;
+  byId("archive-paper").textContent = paper.archived_at
+    ? "恢复已移除论文"
+    : "移除论文（可恢复）";
   byId("paper-meta").textContent = [
-    paper.authors?.join(", "), paper.year, `ID ${paper.id}`,
+    paper.authors?.join(", "), paper.year,
+    paper.title_source === "manual" ? "手动标题" : null,
+    paper.year_source === "manual" ? "手动年份" : null,
+    formulaSummary(paper),
+    `ID ${paper.id}`,
   ].filter(Boolean).join(" · ");
   byId("original-link").href = `/api/papers/${paper.id}/files/original`;
   byId("parsed-link").href = `/api/papers/${paper.id}/files/parsed`;
@@ -126,6 +196,14 @@ async function selectPaper(paperId) {
   } catch (error) {
     showError(error);
   }
+}
+
+function formulaSummary(paper) {
+  if (paper.formula_status === "not_run" || paper.formula_status === "disabled") return null;
+  const summary = `公式：发现 ${paper.formula_detected || 0}，识别 ${paper.formula_recognized || 0}`;
+  if (paper.formula_status === "unavailable") return `${summary}（${paper.formula_error || "公式依赖不可用"}）`;
+  if (paper.formula_fallback) return `${summary}，回退 ${paper.formula_fallback}（${paper.formula_error || "识别失败"}）`;
+  return summary;
 }
 
 function populateCardTypes() {
@@ -218,7 +296,11 @@ async function openReport(reportId) {
 
 function renderUsage() {
   if (!state.usage) return;
-  const summary = state.usage.summary;
+  renderUsageReport(state.usage, "usage-summary", "usage-calls");
+}
+
+function renderUsageReport(report, summaryId, callsId) {
+  const summary = report.summary;
   const metrics = [
     [summary.call_count, "调用次数"],
     [summary.total_tokens.toLocaleString(), "总 tokens"],
@@ -227,16 +309,16 @@ function renderUsage() {
     [`${(summary.total_duration_ms / 1000).toFixed(2)}s`, "累计耗时"],
     [formatMoney(summary.estimated_cost_usd), "估算费用"],
   ];
-  const cards = byId("usage-summary");
+  const cards = byId(summaryId);
   cards.replaceChildren();
   for (const [value, label] of metrics) {
     const metric = node("div", "metric-card");
     metric.append(node("strong", "", value), node("span", "", label));
     cards.append(metric);
   }
-  const wrapper = byId("usage-calls");
+  const wrapper = byId(callsId);
   wrapper.replaceChildren();
-  if (!state.usage.calls?.length) {
+  if (!report.calls?.length) {
     wrapper.append(node("p", "muted", "遥测启用后尚无可显示的调用。"));
     return;
   }
@@ -247,7 +329,7 @@ function renderUsage() {
     headerRow.append(node("th", "", label));
   head.append(headerRow);
   const body = node("tbody");
-  for (const call of state.usage.calls) {
+  for (const call of report.calls) {
     const row = node("tr");
     const values = [
       formatDate(call.started_at), call.operation, call.model,
@@ -263,6 +345,15 @@ function renderUsage() {
   wrapper.append(table);
 }
 
+async function loadGlobalUsage() {
+  try {
+    const report = await api("/api/usage?include_calls=true");
+    renderUsageReport(report, "global-usage-summary", "global-usage-calls");
+  } catch (error) {
+    showError(error);
+  }
+}
+
 function activateTab(name) {
   for (const tab of document.querySelectorAll(".tab"))
     tab.classList.toggle("active", tab.dataset.tab === name);
@@ -276,19 +367,131 @@ async function uploadPaper(event) {
   if (!input.files.length) return;
   const button = byId("upload-button");
   button.disabled = true;
-  button.textContent = "正在解析并生成卡片…";
+  button.textContent = "正在加入队列…";
   try {
-    const form = new FormData();
-    form.append("file", input.files[0]);
-    const result = await api("/api/papers", { method: "POST", body: form });
+    const jobs = [];
+    for (const file of input.files) jobs.push(await uploadWithProgress(file));
     input.value = "";
-    byId("selected-file").textContent = result.duplicate ? "该论文已存在。" : "导入完成。";
-    await Promise.all([loadPapers(result.paper.id), refreshHeader()]);
+    byId("selected-file").textContent = `已加入 ${jobs.length} 个导入任务。`;
+    jobs.forEach((job) => { void watchUpload(job); });
   } catch (error) {
     showError(error);
   } finally {
     button.disabled = false;
-    button.textContent = "导入并生成卡片";
+    button.textContent = "加入导入队列";
+  }
+}
+
+async function regenerateCards() {
+  if (!state.selectedPaper) return;
+  if (!window.confirm("这会调用 Luna 并产生费用。确认重新生成当前论文的卡片吗？")) return;
+  const button = byId("regenerate-cards");
+  button.disabled = true;
+  try {
+    const result = await api(`/api/papers/${state.selectedPaper.id}/card-generations`, { method: "POST" });
+    if (result.status === "failed") showError(result.error || "卡片生成失败，可稍后重试。");
+    await selectPaper(state.selectedPaper.id);
+    await Promise.all([refreshHeader(), loadGlobalUsage()]);
+  } catch (error) {
+    showError(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function reparsePaper() {
+  if (!state.selectedPaper) return;
+  if (!window.confirm("将从保留的原始 PDF 重新解析正文和公式，不调用 LLM，也不会自动重新生成卡片。继续吗？")) return;
+  const button = byId("reparse-paper");
+  button.disabled = true;
+  button.textContent = "正在解析…";
+  try {
+    await api(`/api/papers/${state.selectedPaper.id}/reparse`, { method: "POST" });
+    await loadPapers(state.selectedPaper.id);
+  } catch (error) {
+    showError(error);
+  } finally {
+    button.disabled = false;
+    button.textContent = "重新解析公式";
+  }
+}
+
+async function editPaperTitle() {
+  if (!state.selectedPaper) return;
+  const title = window.prompt("输入论文标题：", state.selectedPaper.title || "");
+  if (title === null) return;
+  try {
+    const updated = await api(`/api/papers/${state.selectedPaper.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    await loadPapers(updated.id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function editPaperYear() {
+  if (!state.selectedPaper) return;
+  const value = window.prompt(
+    "输入出版年份（1000–2100）；留空可清除年份：",
+    state.selectedPaper.year ?? "",
+  );
+  if (value === null) return;
+  const trimmed = value.trim();
+  if (trimmed && !/^\d{4}$/.test(trimmed)) {
+    showError("年份须为四位数字，或留空清除。");
+    return;
+  }
+  try {
+    const updated = await api(`/api/papers/${state.selectedPaper.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ year: trimmed ? Number(trimmed) : null }),
+    });
+    await loadPapers(updated.id);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function archivePaper() {
+  if (!state.selectedPaper) return;
+  const archived = Boolean(state.selectedPaper.archived_at);
+  if (!window.confirm(
+    archived ? "确认恢复这篇论文吗？" : "移除后论文将从默认列表隐藏，但不会删除原始文件或历史记录。确认继续吗？"
+  )) return;
+  try {
+    const path = archived
+      ? `/api/papers/${state.selectedPaper.id}/restore`
+      : `/api/papers/${state.selectedPaper.id}`;
+    await api(path, { method: archived ? "POST" : "DELETE" });
+    if (!archived) {
+      state.selectedPaper = null;
+      byId("paper-workspace").hidden = true;
+      byId("welcome-panel").hidden = false;
+    }
+    await loadPapers(archived ? state.selectedPaper?.id : null);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function permanentlyDeletePaper() {
+  if (!state.selectedPaper) return;
+  const confirmation = window.prompt(
+    `这会永久删除“${state.selectedPaper.title || state.selectedPaper.source_filename}”及其 PDF、解析文本、卡片、精读报告和调用记录。\n\n输入 DELETE 确认：`
+  );
+  if (confirmation !== "DELETE") return;
+  try {
+    await api(`/api/papers/${state.selectedPaper.id}/purge`, { method: "DELETE" });
+    state.selectedPaper = null;
+    byId("paper-workspace").hidden = true;
+    byId("welcome-panel").hidden = false;
+    await Promise.all([loadPapers(), refreshHeader(), loadGlobalUsage()]);
+  } catch (error) {
+    showError(error);
   }
 }
 
@@ -310,7 +513,7 @@ async function generateDeepRead(event) {
     byId("report-content").textContent = report.report;
     byId("report-download").href = `/api/deep-reads/${report.id}/download`;
     byId("report-download").hidden = false;
-    await Promise.all([selectPaper(state.selectedPaper.id), refreshHeader()]);
+    await Promise.all([selectPaper(state.selectedPaper.id), refreshHeader(), loadGlobalUsage()]);
   } catch (error) {
     showError(error);
   } finally {
@@ -353,12 +556,21 @@ async function runSearch(event) {
 function wireEvents() {
   byId("upload-form").addEventListener("submit", uploadPaper);
   byId("pdf-file").addEventListener("change", (event) => {
-    byId("selected-file").textContent = event.target.files[0]?.name || "尚未选择文件";
+    byId("selected-file").textContent = event.target.files.length
+      ? `已选择 ${event.target.files.length} 个文件` : "尚未选择文件";
   });
   byId("refresh-papers").addEventListener("click", () => loadPapers());
+  byId("include-archived").addEventListener("change", () => loadPapers());
+  byId("refresh-global-usage").addEventListener("click", loadGlobalUsage);
   byId("card-type-filter").addEventListener("change", renderCards);
   byId("card-text-filter").addEventListener("input", renderCards);
   byId("deep-read-form").addEventListener("submit", generateDeepRead);
+  byId("edit-paper-title").addEventListener("click", editPaperTitle);
+  byId("edit-paper-year").addEventListener("click", editPaperYear);
+  byId("reparse-paper").addEventListener("click", reparsePaper);
+  byId("regenerate-cards").addEventListener("click", regenerateCards);
+  byId("archive-paper").addEventListener("click", archivePaper);
+  byId("delete-paper").addEventListener("click", permanentlyDeletePaper);
   byId("search-form").addEventListener("submit", runSearch);
   byId("close-search").addEventListener("click", () => { byId("search-panel").hidden = true; });
   byId("close-source").addEventListener("click", () => byId("source-dialog").close());
@@ -368,7 +580,7 @@ function wireEvents() {
 
 async function start() {
   wireEvents();
-  await Promise.all([refreshHeader(), loadPapers()]);
+  await Promise.all([refreshHeader(), loadPapers(), loadGlobalUsage()]);
 }
 
 start();

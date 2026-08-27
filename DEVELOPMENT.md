@@ -11,6 +11,19 @@ python -m pip install -e ".[dev]"
 python --version
 ```
 
+Formula-aware parsing is optional because PaddlePaddle is a platform-specific dependency. Install
+it into the same environment when testing or using formula recognition:
+
+```bash
+conda run -n econ-research python -m pip install -e '.[formula]'
+```
+
+The first formula parse downloads PaddleOCR model assets into the ignored `data/models/` runtime
+directory. On a machine where the optional dependency is unavailable, imports still succeed and
+Docling's extracted formula text is retained; the paper records the unavailable/failed formula
+status instead of failing the complete import. Set `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to
+disable the optional step deliberately.
+
 For agents and non-interactive shells, `conda run -n econ-research COMMAND` is the canonical
 form because it does not depend on shell activation. SQLite must support FTS5; the test suite
 verifies this.
@@ -55,6 +68,8 @@ The first real Docling conversion may download model assets and therefore take l
 later ingestions. Keep downloaded models and runtime paper data outside version control.
 Reparsing is local and non-billable: it uses the preserved PDF, refreshes parsed Markdown and
 chunk provenance, and reconnects existing cards without calling the LLM.
+It also retries formula OCR. It does not rewrite existing card text, so regenerate cards only
+after reviewing the revised source text; that regeneration is an LLM call and may be billable.
 Schema initialization is additive (`CREATE ... IF NOT EXISTS`) so an existing Phase 1 database
 gains new tables without discarding papers. Future incompatible changes require an explicit
 migration rather than database deletion.

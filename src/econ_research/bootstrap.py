@@ -8,8 +8,17 @@ from econ_research.service import ResearchService
 
 
 class LazyDoclingParser:
+    def __init__(
+        self, *, formula_enrichment: bool = False, paddle_formula_ocr: bool = True
+    ) -> None:
+        self.formula_enrichment = formula_enrichment
+        self.paddle_formula_ocr = paddle_formula_ocr
+
     def parse(self, pdf_path):
-        return DoclingParser().parse(pdf_path)
+        return DoclingParser(
+            formula_enrichment=self.formula_enrichment,
+            paddle_formula_ocr=self.paddle_formula_ocr,
+        ).parse(pdf_path)
 
 
 class LazyOpenAIResearchLLM:
@@ -45,7 +54,10 @@ def build_service(settings: Settings | None = None) -> ResearchService:
     settings.ensure_directories()
     return ResearchService(
         repository=SQLiteRepository(settings.db_path),
-        parser=LazyDoclingParser(),
+        parser=LazyDoclingParser(
+            formula_enrichment=settings.formula_enrichment,
+            paddle_formula_ocr=settings.paddle_formula_ocr,
+        ),
         llm=LazyOpenAIResearchLLM(settings),
         originals_dir=settings.originals_dir,
         parsed_dir=settings.parsed_dir,

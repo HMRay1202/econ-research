@@ -110,6 +110,11 @@ button:disabled { cursor: wait; opacity: .55; }
 .library-panel { padding: 1.2rem; border-right: 1px solid var(--line); background: rgb(255 253 248 / 66%); }
 .upload-card { padding: 1.1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); box-shadow: var(--shadow); }
 .upload-card p { font-size: .86rem; line-height: 1.5; }
+.upload-jobs { display: grid; gap: .45rem; margin-top: .75rem; }
+.upload-job { display: grid; grid-template-columns: minmax(0, 1fr) 6rem; gap: .35rem .6rem; align-items: center; font-size: .78rem; }
+.upload-job small { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.upload-job progress { width: 100%; }
+.danger-button { color: #8f2419; }
 .file-picker { display: block; padding: .8rem; border: 1px dashed #9cac9f; border-radius: .55rem; text-align: center; cursor: pointer; }
 .file-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .muted { color: var(--muted); }

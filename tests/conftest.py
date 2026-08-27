@@ -94,4 +94,3 @@ def sample_pdf(tmp_path: Path) -> Path:
     path = tmp_path / "sample.pdf"
     path.write_bytes(b"%PDF-1.4\nsynthetic offline test fixture\n%%EOF\n")
     return path
-

@@ -48,9 +48,15 @@ research serve
 ```
 
 After `research serve`, open `http://127.0.0.1:8000/` for the local research workspace. It can
-upload PDFs, browse cards and source chunks, search the library, access managed files, request
-deep reads, and inspect usage. The API documentation remains available at
+queue single or batch PDF uploads with progress, detect exact and likely duplicates, retry card
+generation without reparsing, archive papers, browse cards and source chunks, search the library,
+access managed files, request deep reads, and inspect per-paper and global usage history. The API
+documentation remains available at
 `http://127.0.0.1:8000/docs`.
+
+Do not open `src/econ_research/web/index.html` directly with a `file:///` URL: it is a static
+client and needs the local `/api/*` service. The launcher detects an older service already using
+port 8000 and asks you to stop it before opening a potentially stale interface.
 
 On macOS, you can instead double-click `start-research.command` in Finder. It locates the existing
 `econ-research` Conda environment, starts the loopback-only server, and opens the workspace. Keep
@@ -60,6 +66,16 @@ the terminal window open while using the app; close it or press Control-C to sto
 original PDF. It is useful after parser improvements: it refreshes paper metadata and page
 provenance, reconnects existing cards by chunk ordinal, and does not call an LLM or regenerate
 cards. Review the refreshed text before relying on it for quotations.
+
+Formula recognition uses a safe two-stage path. Docling identifies formula regions while the
+optional PaddleOCR Formula module converts only those cropped regions to LaTeX. Failed formulas,
+or a missing PaddleOCR installation, retain Docling's original text and never fail an upload.
+Install it with `python -m pip install -e '.[formula]'`; this installs PaddleOCR, PaddlePaddle,
+and its formula-text cleanup dependency. `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` disables this
+step. The older `ECON_RESEARCH_FORMULA_ENRICHMENT=true` CodeFormula path remains experimental and
+is off by default because its accuracy and latency vary by PDF. Use **重新解析公式** to retry the
+non-billable local parse from a preserved original PDF, then explicitly regenerate cards if the
+updated formulas should be included in LLM input.
 
 ## Data and privacy
 

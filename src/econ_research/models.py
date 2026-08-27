@@ -52,6 +52,11 @@ class ParsedDocument(BaseModel):
     year: int | None = None
     markdown: str = Field(min_length=1)
     chunks: list[ParsedChunk] = Field(min_length=1)
+    formula_detected: int = Field(default=0, ge=0)
+    formula_recognized: int = Field(default=0, ge=0)
+    formula_fallback: int = Field(default=0, ge=0)
+    formula_status: str = "not_run"
+    formula_error: str | None = None
 
 
 class ResearchCardDraft(BaseModel):
@@ -75,9 +80,19 @@ class Paper(BaseModel):
     pdf_path: str
     markdown_path: str | None = None
     title: str | None = None
+    title_source: str = "parser"
     authors: list[str] = Field(default_factory=list)
     year: int | None = None
+    year_source: str = "parser"
+    formula_detected: int = Field(default=0, ge=0)
+    formula_recognized: int = Field(default=0, ge=0)
+    formula_fallback: int = Field(default=0, ge=0)
+    formula_status: str = "not_run"
+    formula_error: str | None = None
     status: str
+    card_status: str = "pending"
+    doi: str | None = None
+    archived_at: str | None = None
     error: str | None = None
     created_at: str
     updated_at: str
@@ -88,6 +103,31 @@ class IngestResult(BaseModel):
     chunk_count: int
     card_count: int
     duplicate: bool = False
+    possible_duplicate_of: str | None = None
+
+
+class IngestJob(BaseModel):
+    id: str
+    source_filename: str
+    status: Literal["queued", "running", "succeeded", "failed", "interrupted"]
+    stage: str
+    progress: int = Field(ge=0, le=100)
+    paper_id: str | None = None
+    duplicate_of: str | None = None
+    error: str | None = None
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class CardGeneration(BaseModel):
+    id: str
+    paper_id: str
+    status: Literal["running", "succeeded", "failed"]
+    card_count: int = 0
+    error: str | None = None
+    created_at: str
+    completed_at: str | None = None
 
 
 class ReparseResult(BaseModel):

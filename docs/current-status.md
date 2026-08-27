@@ -23,6 +23,10 @@ and persistence must remain in `SQLiteRepository`.
   reconnected by their prior chunk ordinal.
 - For legacy PDFs whose font mapping damages a title, run a focused first-page OCR fallback.
   It updates recognized title, author, and year metadata without replacing the full body with OCR.
+- Optionally recognize mathematical formulas through Docling formula regions plus PaddleOCR
+  Formula. Formula OCR is crop-level rather than full-page OCR; a missing or failed recognizer
+  preserves Docling text and records diagnostics on the paper. The UI's **重新解析公式** control
+  reruns this local, non-billable parsing workflow.
 
 ## Local operation
 
@@ -46,6 +50,12 @@ call, inspect `research usage --details`. Cards default to Luna/low reasoning; d
 to Terra/medium reasoning. Actual token totals and cost estimates live only in the ignored local
 SQLite database.
 
+Formula OCR is enabled by default only when its optional dependencies are installed. Add them to
+the existing environment with `conda run -n econ-research python -m pip install -e '.[formula]'`.
+The first use downloads model assets under ignored `data/models/`; it is not an OpenAI call. Set
+`ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to turn it off on an unsupported or resource-constrained
+machine.
+
 ## Data and Git boundaries
 
 The repository deliberately excludes `.env`, API keys, PDFs, SQLite databases, parsed paper text,
@@ -61,13 +71,15 @@ SQLite, runtime directories, `.env`, or an API key directly.
 
 Page provenance is now preserved for source chunks and inherited by cards when possible. A
 focused OCR fallback repairs damaged title-page metadata in old PDFs lacking usable Unicode font
-mappings. Dense body text continues to use Docling-native extraction because full-page OCR can
-silently introduce different transcription errors. For quotations or numerical claims, consult
-the original PDF.
+mappings. Formula regions can be selectively converted to LaTex by PaddleOCR Formula after
+Docling layout detection. Dense body text continues to use Docling-native extraction because
+full-page OCR can silently introduce different transcription errors. For quotations or numerical
+claims, consult the original PDF.
 
-The next parser improvement should be confidence-gated and testable on representative PDFs; do
-not globally replace body text with OCR. Keep both the source PDF and parser output available for
-comparison.
+Card text is intentionally unchanged by a reparse: users can review corrected Markdown before
+choosing an explicit, billable card regeneration. The next parser improvement should be
+confidence-gated and testable on representative PDFs; do not globally replace body text with OCR.
+Keep both the source PDF and parser output available for comparison.
 
 ## Safe next increments
 

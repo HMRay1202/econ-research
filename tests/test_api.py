@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import sleep
 
 from fastapi.testclient import TestClient
 
@@ -15,15 +16,27 @@ def test_api_uses_shared_service(service: ResearchService, sample_pdf: Path) -> 
     assert client.get("/assets/app.js").status_code == 200
     assert client.get("/assets/styles.css").status_code == 200
     assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/api/ui-version").json()["version"] == "2026-08-27-formula-v2"
     with sample_pdf.open("rb") as handle:
         response = client.post(
             "/api/papers", files={"file": ("paper.pdf", handle, "application/pdf")}
         )
     assert response.status_code == 200
     paper_id = response.json()["paper"]["id"]
+    updated = client.patch(f"/api/papers/{paper_id}", json={"title": "Reviewed title"})
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Reviewed title"
+    assert updated.json()["title_source"] == "manual"
+    updated_year = client.patch(f"/api/papers/{paper_id}", json={"year": 2024})
+    assert updated_year.status_code == 200
+    assert updated_year.json()["year"] == 2024
+    assert updated_year.json()["year_source"] == "manual"
 
     assert client.get("/api/papers").status_code == 200
     assert client.get(f"/api/papers/{paper_id}").json()["status"] == "ready"
+    reparse = client.post(f"/api/papers/{paper_id}/reparse")
+    assert reparse.status_code == 200
+    assert reparse.json()["paper"]["formula_status"] == "not_run"
 
     cards = client.get(f"/api/papers/{paper_id}/cards")
     assert cards.status_code == 200
@@ -47,9 +60,7 @@ def test_api_uses_shared_service(service: ResearchService, sample_pdf: Path) -> 
     assert search.status_code == 200
     assert len(search.json()) == 2
 
-    deep_read = client.post(
-        f"/api/papers/{paper_id}/deep-read", json={"focus": "identification"}
-    )
+    deep_read = client.post(f"/api/papers/{paper_id}/deep-read", json={"focus": "identification"})
     assert deep_read.status_code == 200
     assert deep_read.json()["paper_id"] == paper_id
     deep_read_id = deep_read.json()["id"]
@@ -75,6 +86,37 @@ def test_api_rejects_non_pdf_upload(service: ResearchService) -> None:
     assert response.status_code == 400
 
 
+def test_api_queued_upload_card_regeneration_and_archive(
+    service: ResearchService, sample_pdf: Path
+) -> None:
+    client = TestClient(create_app(service))
+    with sample_pdf.open("rb") as handle:
+        response = client.post(
+            "/api/uploads", files={"file": ("queued.pdf", handle, "application/pdf")}
+        )
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+    job = response.json()
+    for _ in range(40):
+        job = client.get(f"/api/uploads/{job_id}").json()
+        if job["status"] not in {"queued", "running"}:
+            break
+        sleep(0.01)
+    assert job["status"] == "succeeded"
+    paper_id = job["paper_id"]
+
+    generation = client.post(f"/api/papers/{paper_id}/card-generations")
+    assert generation.status_code == 200
+    assert generation.json()["status"] == "succeeded"
+    assert client.get(f"/api/papers/{paper_id}/card-generations").json()
+
+    assert client.delete(f"/api/papers/{paper_id}").status_code == 200
+    assert client.get("/api/papers").json() == []
+    assert client.post(f"/api/papers/{paper_id}/restore").status_code == 200
+    assert client.delete(f"/api/papers/{paper_id}/purge").status_code == 204
+    assert client.get(f"/api/papers/{paper_id}").status_code == 404
+
+
 def test_read_api_returns_not_found(service: ResearchService) -> None:
     client = TestClient(create_app(service))
 
@@ -93,9 +135,7 @@ def test_file_api_rejects_path_outside_managed_directory(
             "UPDATE papers SET pdf_path = ? WHERE id = ?", (str(sample_pdf), paper.id)
         )
 
-    response = TestClient(create_app(service)).get(
-        f"/api/papers/{paper.id}/files/original"
-    )
+    response = TestClient(create_app(service)).get(f"/api/papers/{paper.id}/files/original")
 
     assert response.status_code == 409
     assert "outside the managed data directory" in response.json()["detail"]

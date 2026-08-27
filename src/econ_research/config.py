@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     )
     data_dir: Path = Field(default=Path("data"), alias="ECON_RESEARCH_DATA_DIR")
     db_path: Path = Field(default=Path("data/research.db"), alias="ECON_RESEARCH_DB_PATH")
+    formula_enrichment: bool = Field(
+        default=False, alias="ECON_RESEARCH_FORMULA_ENRICHMENT"
+    )
+    paddle_formula_ocr: bool = Field(default=True, alias="ECON_RESEARCH_PADDLE_FORMULA_OCR")
 
     @property
     def originals_dir(self) -> Path:

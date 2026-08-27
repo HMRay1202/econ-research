@@ -31,4 +31,3 @@ def render_document(title: str, chunks: list[dict[str, object]], max_chars: int 
         parts.append(piece)
         used += len(piece)
     return "".join(parts)
-

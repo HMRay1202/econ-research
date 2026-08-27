@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,10 +12,12 @@ from econ_research.db.repository import SQLiteRepository
 from econ_research.llm.base import ResearchLLM
 from econ_research.llm.telemetry import LLMCallError, LLMResult
 from econ_research.models import (
+    CardGeneration,
     CardType,
     ClaimKind,
     DeepReadResult,
     DeepReadSummary,
+    IngestJob,
     IngestResult,
     Paper,
     ParsedChunk,
@@ -53,11 +58,17 @@ class ResearchService:
         self.originals_dir = originals_dir
         self.parsed_dir = parsed_dir
         self.generated_dir = generated_dir
-        for directory in (originals_dir, parsed_dir, generated_dir):
+        self.incoming_dir = originals_dir.parent / "incoming"
+        for directory in (originals_dir, parsed_dir, generated_dir, self.incoming_dir):
             directory.mkdir(parents=True, exist_ok=True)
         self.repository.initialize()
+        self.repository.interrupt_running_jobs()
+        self.repository.recover_orphaned_processing_papers()
+        self._jobs = ThreadPoolExecutor(max_workers=1, thread_name_prefix="econ-research-ingest")
 
-    def ingest(self, source: Path | str) -> IngestResult:
+    def ingest(
+        self, source: Path | str, on_stage: Callable[[str, int], None] | None = None
+    ) -> IngestResult:
         source_path = Path(source).expanduser().resolve()
         self._validate_pdf(source_path)
         sha256 = _sha256(source_path)
@@ -89,39 +100,189 @@ class ResearchService:
                 paper_id, sha256, source_path.name, str(pdf_path)
             )
         try:
+            if on_stage:
+                on_stage("parsing", 30)
             document = self.parser.parse(pdf_path)
             markdown_path.write_text(document.markdown, encoding="utf-8")
-            try:
-                generated_cards = self.llm.generate_cards(document)
-            except LLMCallError as exc:
-                self.repository.save_llm_call(paper_id, "generate_cards", exc.metrics)
-                raise
-            if isinstance(generated_cards, LLMResult):
-                self.repository.save_llm_call(
-                    paper_id, "generate_cards", generated_cards.metrics
-                )
-                cards = generated_cards.value
-            else:  # Test doubles and custom local backends may omit telemetry.
-                cards = generated_cards
-            valid_ordinals = {chunk.ordinal for chunk in document.chunks}
-            invalid_ordinals = {
-                card.chunk_ordinal
-                for card in cards
-                if card.chunk_ordinal is not None and card.chunk_ordinal not in valid_ordinals
-            }
-            if invalid_ordinals:
-                raise ValueError(
-                    f"LLM cards reference unknown source chunks: {sorted(invalid_ordinals)}"
-                )
-            chunk_count, card_count = self.repository.finalize_ingest(
-                paper_id, str(markdown_path), document, cards
+            chunk_count, _ = self.repository.finalize_ingest(
+                paper_id, str(markdown_path), document, []
             )
+            possible_duplicate = self.repository.find_possible_duplicate(
+                doi=_extract_doi(document.markdown),
+                normalized_text_sha256=_normalized_text_sha256(document.markdown),
+                title=document.title,
+            )
+            self.repository.update_document_identity(
+                paper_id,
+                doi=_extract_doi(document.markdown),
+                normalized_text_sha256=_normalized_text_sha256(document.markdown),
+            )
+            if on_stage:
+                on_stage("generating_cards", 75)
+            self.regenerate_cards(paper_id)
+            card_count = self.repository.count_cards(paper_id)
+            if on_stage:
+                on_stage("saving", 95)
         except Exception as exc:
             self.repository.mark_failed(paper_id, f"{type(exc).__name__}: {exc}")
             raise
         completed = self.repository.get_paper(paper_id)
         assert completed is not None
-        return IngestResult(paper=completed, chunk_count=chunk_count, card_count=card_count)
+        return IngestResult(
+            paper=completed,
+            chunk_count=chunk_count,
+            card_count=card_count,
+            possible_duplicate_of=(possible_duplicate.id if possible_duplicate else None),
+        )
+
+    def queue_upload(self, source: Path | str) -> IngestJob:
+        """Persist an uploaded file, then process it in the local single-worker queue."""
+        source_path = Path(source).resolve()
+        upload_path = self.incoming_dir / f"{uuid4()}-{source_path.name}"
+        shutil.copy2(source_path, upload_path)
+        job = self.repository.create_ingest_job(source_path.name, str(upload_path))
+        self._jobs.submit(self._run_ingest_job, job.id, upload_path)
+        return job
+
+    def _run_ingest_job(self, job_id: str, upload_path: Path) -> None:
+        self.repository.update_ingest_job(job_id, status="running", stage="validating", progress=5)
+        try:
+            result = self.ingest(
+                upload_path,
+                on_stage=lambda stage, progress: self.repository.update_ingest_job(
+                    job_id, stage=stage, progress=progress
+                ),
+            )
+            self.repository.update_ingest_job(
+                job_id,
+                status="succeeded",
+                stage="completed",
+                progress=100,
+                paper_id=result.paper.id,
+                duplicate_of=result.paper.id if result.duplicate else result.possible_duplicate_of,
+                complete=True,
+            )
+        except Exception as exc:
+            self.repository.update_ingest_job(
+                job_id,
+                status="failed",
+                stage="failed",
+                progress=100,
+                error=f"{type(exc).__name__}: {exc}"[:2000],
+                complete=True,
+            )
+        finally:
+            upload_path.unlink(missing_ok=True)
+
+    def get_ingest_job(self, job_id: str) -> IngestJob:
+        job = self.repository.get_ingest_job(job_id)
+        if not job:
+            raise PaperNotFoundError(f"Upload task not found: {job_id}")
+        return job
+
+    def regenerate_cards(self, paper_id: str) -> CardGeneration:
+        paper = self.get_paper(paper_id)
+        if paper.status != "ready":
+            raise PaperNotFoundError(f"Ready paper not found: {paper_id}")
+        chunks = self.repository.get_chunks(paper_id)
+        document = ParsedDocument(
+            title=paper.title or paper.source_filename,
+            authors=paper.authors,
+            year=paper.year,
+            markdown="\n\n".join(str(chunk["text"]) for chunk in chunks),
+            chunks=[
+                ParsedChunk(
+                    **{
+                        key: chunk[key]
+                        for key in ("ordinal", "text", "section", "page_start", "page_end")
+                    }
+                )
+                for chunk in chunks
+            ],
+        )
+        generation = self.repository.create_card_generation(paper_id)
+        try:
+            generated = self.llm.generate_cards(document)
+            if isinstance(generated, LLMResult):
+                self.repository.save_llm_call(paper_id, "generate_cards", generated.metrics)
+                cards = generated.value
+            else:
+                cards = generated
+            count = self.repository.replace_cards(paper_id, generation.id, cards)
+            self.repository.finish_card_generation(generation.id, card_count=count)
+        except LLMCallError as exc:
+            self.repository.save_llm_call(paper_id, "generate_cards", exc.metrics)
+            self.repository.finish_card_generation(generation.id, error=str(exc))
+        except Exception as exc:
+            self.repository.finish_card_generation(
+                generation.id, error=f"{type(exc).__name__}: {exc}"
+            )
+        return self.repository.list_card_generations(paper_id)[0]
+
+    def list_card_generations(self, paper_id: str) -> list[CardGeneration]:
+        self.get_paper(paper_id)
+        return self.repository.list_card_generations(paper_id)
+
+    def archive_paper(self, paper_id: str, archived: bool = True) -> Paper:
+        self.get_paper(paper_id)
+        self.repository.set_archived(paper_id, archived)
+        return self.get_paper(paper_id)
+
+    def update_paper_metadata(
+        self,
+        paper_id: str,
+        *,
+        title: str | None = None,
+        update_title: bool = False,
+        year: int | None = None,
+        update_year: bool = False,
+    ) -> Paper:
+        if not update_title and not update_year:
+            raise ValueError("provide a title or year to update")
+        if update_title:
+            if title is None:
+                raise ValueError("title must contain 1 to 300 characters")
+            title = " ".join(title.split())
+            if not 1 <= len(title) <= 300:
+                raise ValueError("title must contain 1 to 300 characters")
+        if update_year and year is not None and not 1000 <= year <= 2100:
+            raise ValueError("year must be between 1000 and 2100")
+        paper = self.repository.update_paper_metadata(
+            paper_id,
+            title=title,
+            update_title=update_title,
+            year=year,
+            update_year=update_year,
+        )
+        if not paper:
+            raise PaperNotFoundError(f"Paper not found: {paper_id}")
+        return paper
+
+    def update_paper_title(self, paper_id: str, title: str) -> Paper:
+        """Compatibility wrapper for callers that update only the title."""
+        return self.update_paper_metadata(paper_id, title=title, update_title=True)
+
+    def permanently_delete_paper(self, paper_id: str) -> None:
+        """Irreversibly remove one paper and only its files inside managed directories."""
+        paper = self.get_paper(paper_id)
+        source_paths, deep_read_ids = self.repository.paper_deletion_paths(paper_id)
+        managed_paths = [
+            self._managed_file_if_present(path, self.originals_dir) for path in source_paths
+        ]
+        if paper.markdown_path:
+            managed_paths.append(
+                self._managed_file_if_present(paper.markdown_path, self.parsed_dir)
+            )
+        managed_paths.extend(
+            self._managed_file_if_present(
+                str(self.generated_dir / f"deep-read-{deep_read_id}.md"), self.generated_dir
+            )
+            for deep_read_id in deep_read_ids
+        )
+        self.repository.delete_paper(paper_id)
+        for path in managed_paths:
+            if path is not None:
+                path.unlink()
 
     def search(self, query: str, limit: int = 20):
         return self.repository.search(query, limit)
@@ -187,8 +348,8 @@ class ResearchService:
             raise PaperNotFoundError(f"Paper not found: {paper_id}")
         return paper
 
-    def list_papers(self) -> list[Paper]:
-        return self.repository.list_papers()
+    def list_papers(self, *, include_archived: bool = False) -> list[Paper]:
+        return self.repository.list_papers(include_archived=include_archived)
 
     def list_cards(
         self,
@@ -274,6 +435,14 @@ class ResearchService:
             raise FileNotFoundError(f"Stored file not found: {candidate.name}")
         return candidate
 
+    @staticmethod
+    def _managed_file_if_present(raw_path: str, root: Path) -> Path | None:
+        candidate = Path(raw_path).resolve()
+        managed_root = root.resolve()
+        if not candidate.is_relative_to(managed_root):
+            raise ValueError("Stored file path is outside the managed data directory")
+        return candidate if candidate.is_file() else None
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -281,3 +450,13 @@ def _sha256(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _normalized_text_sha256(markdown: str) -> str:
+    normalized = re.sub(r"\s+", " ", markdown).strip().casefold()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _extract_doi(markdown: str) -> str | None:
+    match = re.search(r"\b10\.\d{4,9}/[-._;()/:a-z0-9]+", markdown, flags=re.IGNORECASE)
+    return match.group(0).rstrip(".,;:)").lower() if match else None

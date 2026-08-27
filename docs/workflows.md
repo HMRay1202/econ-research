@@ -16,7 +16,11 @@ includes its paper ID and provenance where applicable.
 Load the managed original PDF for a ready paper and run the current parser again. Replace only
 the generated Markdown and chunk records, then reconnect cards to their same-ordinal replacement
 chunks and fill missing section/page provenance. This workflow never calls the LLM and never
-modifies the source PDF, cards' generated text, or deep-read reports.
+modifies the source PDF, cards' generated text, or deep-read reports. When configured, it also
+retries PaddleOCR Formula for each Docling-detected formula region and stores formula diagnostics
+on the paper. Recognition is best-effort: a bad, unavailable, or timed-out formula crop falls
+back to the original Docling text while the rest of the paper remains usable. Regenerate cards
+separately if corrected formulas should be included in card prompts.
 
 ## Deep read
 
