@@ -66,6 +66,24 @@ if ! "$conda_binary" env list | awk '{print $1}' | grep -qx "econ-research"; the
   exit 1
 fi
 
+editable_install_matches_project() {
+  "$conda_binary" run -n econ-research python -c '
+from pathlib import Path
+import sys
+
+import econ_research
+
+expected = Path(sys.argv[1]).resolve() / "src" / "econ_research"
+actual = Path(econ_research.__file__).resolve().parent
+raise SystemExit(actual != expected)
+' "$PROJECT_DIR"
+}
+
+if ! editable_install_matches_project >/dev/null 2>&1; then
+  print "检测到 econ_research 尚未安装，或仍指向项目移动前的位置；正在修复可编辑安装…"
+  "$conda_binary" run -n econ-research python -m pip install -e ".[dev,formula]"
+fi
+
 wait_and_open() {
   local attempt
   for attempt in {1..80}; do

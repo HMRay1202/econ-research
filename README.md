@@ -59,8 +59,12 @@ client and needs the local `/api/*` service. The launcher detects an older servi
 port 8000 and asks you to stop it before opening a potentially stale interface.
 
 On macOS, you can instead double-click `start-research.command` in Finder. It locates the existing
-`econ-research` Conda environment, starts the loopback-only server, and opens the workspace. Keep
-the terminal window open while using the app; close it or press Control-C to stop the server.
+`econ-research` Conda environment, verifies that its editable `econ_research` import points to this
+project's `src/econ_research`, starts the loopback-only server, and opens the workspace. After a
+project move, or when the package is not installed, it automatically runs
+`conda run -n econ-research python -m pip install -e ".[dev,formula]"` once to repair the editable
+installation; when the import already points here, it does not reinstall dependencies. Keep the
+terminal window open while using the app; close it or press Control-C to stop the server.
 
 On Windows, run the same server command from **Anaconda Prompt** (or another shell in which Conda
 is available), then open the displayed loopback address in a browser:

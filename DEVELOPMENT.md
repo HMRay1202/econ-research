@@ -24,8 +24,12 @@ Docling's extracted formula text is retained; the paper records the unavailable/
 status instead of failing the complete import. Set `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to
 disable the optional step deliberately.
 
-On macOS, `start-research.command` is a convenience launcher. On Windows, use Anaconda Prompt and
-the platform-neutral server command instead:
+On macOS, `start-research.command` is a convenience launcher. Before starting the server, it
+checks that `econ_research` imports from this checkout's `src/econ_research`. If a project move
+left the editable installation pointing elsewhere, or the package is missing, the launcher repairs
+it with `conda run -n econ-research python -m pip install -e ".[dev,formula]"`; a correct local
+installation is left untouched. On Windows, use Anaconda Prompt and the platform-neutral server
+command instead:
 
 ```powershell
 conda run -n econ-research research serve

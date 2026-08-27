@@ -43,7 +43,11 @@ conda run -n econ-research research serve
 ```
 
 Open `http://127.0.0.1:8000/` after starting the server, or use `start-research.command` on
-macOS. The normal non-billable maintenance command is:
+macOS. The launcher keeps its existing port and Conda checks, and also confirms that
+`econ_research` imports from the current checkout's `src/econ_research`. If the project has moved
+or the editable package is absent, it repairs that installation with
+`conda run -n econ-research python -m pip install -e ".[dev,formula]"`; it skips this command when
+the installed import is already correct. The normal non-billable maintenance command is:
 
 ```bash
 conda run -n econ-research research reparse PAPER_ID
