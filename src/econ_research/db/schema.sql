@@ -74,8 +74,10 @@ CREATE TABLE IF NOT EXISTS ingest_jobs (
     progress INTEGER NOT NULL DEFAULT 0,
     paper_id TEXT REFERENCES papers(id) ON DELETE SET NULL,
     duplicate_of TEXT REFERENCES papers(id) ON DELETE SET NULL,
+    message TEXT NOT NULL DEFAULT '',
     error TEXT,
     created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
     started_at TEXT,
     completed_at TEXT
 );

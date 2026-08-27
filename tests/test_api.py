@@ -117,6 +117,35 @@ def test_api_queued_upload_card_regeneration_and_archive(
     assert client.get(f"/api/papers/{paper_id}").status_code == 404
 
 
+def test_api_lists_persisted_active_uploads_for_page_refresh(
+    service: ResearchService, sample_pdf: Path
+) -> None:
+    job = service.repository.create_ingest_job("refresh.pdf", str(sample_pdf))
+    service.repository.update_ingest_job(
+        job.id,
+        status="running",
+        stage="parsing",
+        progress=30,
+        message="正在读取并解析 PDF；首次运行可能准备本地模型。",
+    )
+
+    jobs = TestClient(create_app(service)).get("/api/uploads").json()
+
+    assert len(jobs) == 1
+    assert jobs[0]["id"] == job.id
+    assert jobs[0]["message"].startswith("正在读取并解析 PDF")
+    assert jobs[0]["updated_at"]
+
+
+def test_frontend_restores_active_upload_jobs_after_refresh(service: ResearchService) -> None:
+    script = TestClient(create_app(service)).get("/assets/app.js")
+
+    assert script.status_code == 200
+    assert "async function restoreUploadJobs()" in script.text
+    assert 'api("/api/uploads")' in script.text
+    assert "job.message" in script.text
+
+
 def test_read_api_returns_not_found(service: ResearchService) -> None:
     client = TestClient(create_app(service))
 

@@ -120,6 +120,11 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
         finally:
             await file.close()
 
+    @application.get("/api/uploads", response_model=list[IngestJob])
+    def list_uploads(request: Request, active_only: bool = True) -> list[IngestJob]:
+        """Return persisted tasks so a refreshed browser can resume progress display."""
+        return get_service(request).list_ingest_jobs(active_only=active_only)
+
     @application.get("/api/uploads/{job_id}", response_model=IngestJob)
     def get_upload(request: Request, job_id: str) -> IngestJob:
         try:

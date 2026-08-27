@@ -114,8 +114,10 @@ class IngestJob(BaseModel):
     progress: int = Field(ge=0, le=100)
     paper_id: str | None = None
     duplicate_of: str | None = None
+    message: str = ""
     error: str | None = None
     created_at: str
+    updated_at: str
     started_at: str | None = None
     completed_at: str | None = None
 

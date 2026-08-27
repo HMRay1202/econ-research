@@ -84,6 +84,13 @@ class SQLiteRepository:
             )
             self._add_column_if_missing(connection, "papers", "formula_error TEXT")
             self._add_column_if_missing(connection, "cards", "generation_id TEXT")
+            self._add_column_if_missing(
+                connection, "ingest_jobs", "message TEXT NOT NULL DEFAULT ''"
+            )
+            self._add_column_if_missing(connection, "ingest_jobs", "updated_at TEXT")
+            connection.execute(
+                "UPDATE ingest_jobs SET updated_at = COALESCE(updated_at, created_at)"
+            )
             connection.execute("CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(doi)")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_papers_normalized_text "
@@ -275,19 +282,23 @@ class SQLiteRepository:
         return len(document.chunks), len(cards)
 
     def create_ingest_job(self, source_filename: str, upload_path: str) -> IngestJob:
+        timestamp = utc_now()
         job = IngestJob(
             id=str(uuid4()),
             source_filename=source_filename,
             status="queued",
             stage="queued",
             progress=0,
-            created_at=utc_now(),
+            message="已加入本地导入队列，正在等待可用工作线程。",
+            created_at=timestamp,
+            updated_at=timestamp,
         )
         with self.connect() as connection:
             connection.execute(
                 """INSERT INTO ingest_jobs
-                   (id, source_filename, upload_path, status, stage, progress, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (id, source_filename, upload_path, status, stage, progress, message,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job.id,
                     job.source_filename,
@@ -295,7 +306,9 @@ class SQLiteRepository:
                     job.status,
                     job.stage,
                     job.progress,
+                    job.message,
                     job.created_at,
+                    job.updated_at,
                 ),
             )
         return job
@@ -304,6 +317,14 @@ class SQLiteRepository:
         with self.connect() as connection:
             row = connection.execute("SELECT * FROM ingest_jobs WHERE id = ?", (job_id,)).fetchone()
         return IngestJob(**dict(row)) if row else None
+
+    def list_ingest_jobs(self, *, active_only: bool = True, limit: int = 50) -> list[IngestJob]:
+        where = "WHERE status IN ('queued', 'running')" if active_only else ""
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM ingest_jobs {where} ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [IngestJob(**dict(row)) for row in rows]
 
     def update_ingest_job(
         self,
@@ -314,6 +335,7 @@ class SQLiteRepository:
         progress: int | None = None,
         paper_id: str | None = None,
         duplicate_of: str | None = None,
+        message: str | None = None,
         error: str | None = None,
         complete: bool = False,
     ) -> None:
@@ -325,6 +347,7 @@ class SQLiteRepository:
             ("progress", progress),
             ("paper_id", paper_id),
             ("duplicate_of", duplicate_of),
+            ("message", message),
             ("error", error),
         ):
             if value is not None:
@@ -336,8 +359,8 @@ class SQLiteRepository:
         if complete:
             updates.append("completed_at = ?")
             values.append(utc_now())
-        if not updates:
-            return
+        updates.append("updated_at = ?")
+        values.append(utc_now())
         values.append(job_id)
         with self.connect() as connection:
             connection.execute(f"UPDATE ingest_jobs SET {', '.join(updates)} WHERE id = ?", values)
@@ -347,8 +370,9 @@ class SQLiteRepository:
             connection.execute(
                 """UPDATE ingest_jobs SET status = 'interrupted', stage = 'interrupted',
                    error = COALESCE(error, 'The local service stopped before this task completed'),
-                   completed_at = ? WHERE status = 'running'""",
-                (utc_now(),),
+                   message = '本地服务在任务完成前停止。', completed_at = ?, updated_at = ?
+                   WHERE status = 'running'""",
+                (utc_now(), utc_now()),
             )
 
     def recover_orphaned_processing_papers(self) -> None:

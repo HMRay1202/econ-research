@@ -11,6 +11,7 @@ filesystem paths from them.
 | `GET` | `/health` | Local service health |
 | `POST` | `/api/papers` | Upload and ingest one PDF |
 | `POST` | `/api/uploads` | Queue one PDF upload and return a task record |
+| `GET` | `/api/uploads` | List persisted active upload tasks for page-refresh recovery |
 | `GET` | `/api/uploads/{job_id}` | Read upload, parse, and card-generation progress |
 | `GET` | `/api/papers` | List papers |
 | `GET` | `/api/papers/{paper_id}` | Get one paper |
@@ -71,7 +72,9 @@ to `ordinal` in this response. Page fields remain nullable.
 `POST /api/uploads` accepts the same multipart `file` field as the legacy synchronous ingest
 route, but returns `202` after browser transfer. The local single-worker queue validates,
 deduplicates, parses, and generates cards; poll `GET /api/uploads/{job_id}` while status is
-`queued` or `running`.
+`queued` or `running`. `GET /api/uploads` returns persisted active tasks by default, so a browser
+refresh can restore progress display. `message` is the latest human-readable backend update and
+`updated_at` records when it was written.
 
 ```json
 {
@@ -82,6 +85,8 @@ deduplicates, parses, and generates cards; poll `GET /api/uploads/{job_id}` whil
   "progress": 25,
   "paper_id": null,
   "duplicate_of": null,
+  "message": "正在读取并解析 PDF；首次运行可能准备本地模型。",
+  "updated_at": "2026-08-27T12:00:00+00:00",
   "error": null
 }
 ```

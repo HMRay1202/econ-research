@@ -31,7 +31,7 @@ editable checkout as well.
 
 ## Current product surface
 
-- Single or batch PDF upload with browser transfer progress and local task-stage progress.
+- Single or batch PDF upload with browser transfer progress and persisted local task-stage output.
 - Card-generation retry: a parsed paper remains available if the billable Luna call fails.
 - Paper list and paper detail metadata.
 - Card browsing, type filtering, text filtering, and source-chunk inspection.
@@ -50,6 +50,10 @@ editable checkout as well.
 
 Dynamic strings are assigned through `textContent`; do not render model or PDF-derived content
 with `innerHTML`. The UI uses same-origin requests, so CORS is neither needed nor enabled.
+
+Upload jobs are server-side records. On page load, the client requests `GET /api/uploads` and
+resumes polling queued or running jobs, so refreshing during parsing restores the visible backend
+stage message instead of creating a replacement placeholder.
 
 ## Extension rules
 

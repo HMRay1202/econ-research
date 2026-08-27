@@ -43,7 +43,10 @@ function renderUploadJobs() {
     const progress = document.createElement("progress");
     progress.max = 100;
     progress.value = job.progress;
-    const detail = node("small", "muted", `${job.progress}%${job.error ? ` · ${job.error}` : ""}`);
+    const detail = node(
+      "small", "muted",
+      `${job.progress}% · ${job.message || "正在等待后台更新。"}${job.error ? ` · ${job.error}` : ""}`,
+    );
     row.append(label, progress, detail);
     list.append(row);
   }
@@ -93,6 +96,13 @@ async function watchUpload(job) {
   } else if (job.status !== "interrupted") {
     showError(`${job.source_filename}: ${job.error || "导入失败"}`);
   }
+}
+
+async function restoreUploadJobs() {
+  const jobs = await api("/api/uploads");
+  for (const job of jobs) state.uploadJobs.set(job.id, job);
+  renderUploadJobs();
+  jobs.forEach((job) => { void watchUpload(job); });
 }
 
 function node(tag, className, text) {
@@ -580,7 +590,7 @@ function wireEvents() {
 
 async function start() {
   wireEvents();
-  await Promise.all([refreshHeader(), loadPapers(), loadGlobalUsage()]);
+  await Promise.all([refreshHeader(), loadPapers(), loadGlobalUsage(), restoreUploadJobs()]);
 }
 
 start();

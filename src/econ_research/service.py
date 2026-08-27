@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import shutil
 from collections.abc import Callable
@@ -29,6 +30,8 @@ from econ_research.models import (
 )
 from econ_research.parsing.base import Parser
 
+logger = logging.getLogger(__name__)
+
 
 class PaperNotFoundError(LookupError):
     pass
@@ -40,6 +43,14 @@ class DuplicateInProgressError(RuntimeError):
 
 class DeepReadNotFoundError(LookupError):
     pass
+
+
+def _stage_message(stage: str) -> str:
+    return {
+        "parsing": "正在读取并解析 PDF；首次运行可能准备本地模型。",
+        "generating_cards": "正在生成研究卡片。",
+        "saving": "正在保存解析结果和索引。",
+    }.get(stage, f"正在执行：{stage}。")
 
 
 class ResearchService:
@@ -141,33 +152,44 @@ class ResearchService:
         upload_path = self.incoming_dir / f"{uuid4()}-{source_path.name}"
         shutil.copy2(source_path, upload_path)
         job = self.repository.create_ingest_job(source_path.name, str(upload_path))
+        self._report_ingest_job(
+            job.id, stage="queued", progress=0, message="已保存上传文件，正在等待导入队列。"
+        )
         self._jobs.submit(self._run_ingest_job, job.id, upload_path)
         return job
 
     def _run_ingest_job(self, job_id: str, upload_path: Path) -> None:
-        self.repository.update_ingest_job(job_id, status="running", stage="validating", progress=5)
+        self._report_ingest_job(
+            job_id,
+            status="running",
+            stage="validating",
+            progress=5,
+            message="正在验证 PDF 文件。",
+        )
         try:
             result = self.ingest(
                 upload_path,
-                on_stage=lambda stage, progress: self.repository.update_ingest_job(
-                    job_id, stage=stage, progress=progress
+                on_stage=lambda stage, progress: self._report_ingest_job(
+                    job_id, stage=stage, progress=progress, message=_stage_message(stage)
                 ),
             )
-            self.repository.update_ingest_job(
+            self._report_ingest_job(
                 job_id,
                 status="succeeded",
                 stage="completed",
                 progress=100,
                 paper_id=result.paper.id,
                 duplicate_of=result.paper.id if result.duplicate else result.possible_duplicate_of,
+                message="导入完成，论文现已显示在资料库中。",
                 complete=True,
             )
         except Exception as exc:
-            self.repository.update_ingest_job(
+            self._report_ingest_job(
                 job_id,
                 status="failed",
                 stage="failed",
                 progress=100,
+                message="导入失败；请查看下方错误信息后重试。",
                 error=f"{type(exc).__name__}: {exc}"[:2000],
                 complete=True,
             )
@@ -179,6 +201,37 @@ class ResearchService:
         if not job:
             raise PaperNotFoundError(f"Upload task not found: {job_id}")
         return job
+
+    def list_ingest_jobs(self, *, active_only: bool = True) -> list[IngestJob]:
+        return self.repository.list_ingest_jobs(active_only=active_only)
+
+    def _report_ingest_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        stage: str | None = None,
+        progress: int | None = None,
+        message: str | None = None,
+        paper_id: str | None = None,
+        duplicate_of: str | None = None,
+        error: str | None = None,
+        complete: bool = False,
+    ) -> None:
+        self.repository.update_ingest_job(
+            job_id,
+            status=status,
+            stage=stage,
+            progress=progress,
+            message=message,
+            paper_id=paper_id,
+            duplicate_of=duplicate_of,
+            error=error,
+            complete=complete,
+        )
+        if message:
+            logger.info("Upload %s [%s]: %s", job_id, stage or "update", message)
+            print(f"[Econ Research] upload {job_id}: {message}", flush=True)
 
     def regenerate_cards(self, paper_id: str) -> CardGeneration:
         paper = self.get_paper(paper_id)
