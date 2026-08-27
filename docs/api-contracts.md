@@ -133,7 +133,10 @@ formula recognizer keeps the original Docling text and never fails the complete 
 | `GET` | `/api/deep-reads/{deep_read_id}` | Complete stored report |
 | `GET` | `/api/deep-reads/{deep_read_id}/download` | Markdown attachment |
 
-The `POST` route creates a new report; the `GET` routes never call an LLM.
+The `POST` route creates a new report; the `GET` routes never call an LLM. The local web client
+renders report Markdown and source chunks with packaged sanitizer and KaTeX assets; these routes
+continue to return the original Markdown string, so rendering does not change the API
+representation.
 
 ## Managed file routes
 

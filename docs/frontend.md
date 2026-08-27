@@ -48,8 +48,19 @@ editable checkout as well.
 - **重新解析公式** retries the non-billable parser pipeline from the preserved original PDF; users
   explicitly regenerate cards afterward if the revised text should become LLM input.
 
-Dynamic strings are assigned through `textContent`; do not render model or PDF-derived content
-with `innerHTML`. The UI uses same-origin requests, so CORS is neither needed nor enabled.
+Most dynamic strings are assigned through `textContent`. Deep-read reports and source chunks are
+the deliberate exception: the shared `renderMarkdown` helper first parses local Markdown with
+Marked, removes raw HTML, sanitizes the resulting document with DOMPurify, then renders LaTeX
+delimiters with local KaTeX. It allows only document-oriented Markdown elements and safe
+`http`, `https`, and `mailto` links; scripts, event attributes, forms, iframes, SVG, images, and
+embedded media are not rendered. Do not bypass this helper with `innerHTML`.
+
+The web package includes fixed-version third-party assets under `web/vendor/`, so rendering does
+not require a CDN, Node build, or network connection. KaTeX uses `throwOnError: false` and
+`trust: false`: malformed parser/OCR LaTeX remains visible instead of breaking a report, and
+untrusted formula commands cannot opt into privileged output. Before Markdown parsing, the helper
+temporarily preserves `\\[...\\]` and `\\(...\\)` delimiters because ordinary Markdown would otherwise
+treat their backslashes as escapes before KaTeX sees them.
 
 Upload jobs are server-side records. On page load, the client requests `GET /api/uploads` and
 resumes polling queued or running jobs, so refreshing during parsing restores the visible backend
@@ -82,7 +93,8 @@ remain compatible.
   retained as history; the current card set is replaced only after a successful generation.
 - Global cards can be filtered by paper, type, and claim kind, but tag normalization is deferred.
 - Search is lexical FTS5 rather than semantic search.
-- Deep-read Markdown is displayed as safe plain text rather than rendered HTML.
+- Deep reads and source chunks render safe Markdown and local KaTeX. For a quotation or a
+  formula whose OCR/parse result appears uncertain, consult the original PDF.
 - The UI has no user accounts because it is intended for loopback-only use.
 
 Good independent additions are card export, a cross-paper comparison tray, targeted body-text
