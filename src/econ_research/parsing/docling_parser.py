@@ -43,11 +43,10 @@ class DoclingParser:
             raise RuntimeError(
                 "Docling is not installed. Install the project dependencies before ingestion."
             ) from exc
-        format_options = None
-        if formula_enrichment:
-            format_options = {
-                InputFormat.PDF: PdfFormatOption(pipeline_options=_formula_pipeline_options())
-            }
+        pipeline_options = (
+            _formula_pipeline_options() if formula_enrichment else _default_pipeline_options()
+        )
+        format_options = {InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
         self._converter = DocumentConverter(format_options=format_options)
         self._formula_enricher = FormulaEnricher() if paddle_formula_ocr else None
 
@@ -157,6 +156,16 @@ def _formula_pipeline_options():
     )
     options.do_formula_enrichment = True
     options.document_timeout = 180
+    return options
+
+
+def _default_pipeline_options():
+    """Prefer a detected accelerator while retaining Docling's CPU fallback."""
+    from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+    options = PdfPipelineOptions()
+    options.accelerator_options = AcceleratorOptions(device=AcceleratorDevice.AUTO)
     return options
 
 

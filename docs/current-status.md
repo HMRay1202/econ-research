@@ -47,7 +47,11 @@ macOS. The launcher keeps its existing port and Conda checks, and also confirms 
 `econ_research` imports from the current checkout's `src/econ_research`. If the project has moved
 or the editable package is absent, it repairs that installation with
 `conda run -n econ-research python -m pip install -e ".[dev,formula]"`; it skips this command when
-the installed import is already correct. The normal non-billable maintenance command is:
+the installed import is already correct. Windows has an equivalent `start-research.cmd` launcher;
+it also reports PyTorch and Paddle CUDA availability. CPU-only operation is supported, while CUDA
+requires matching NVIDIA drivers and GPU-enabled package builds. Before the Windows launcher
+creates a missing Conda environment or downloads packages to repair an editable installation, it
+asks for one confirmation. The normal non-billable maintenance command is:
 
 ```bash
 conda run -n econ-research research reparse PAPER_ID

@@ -28,12 +28,23 @@ On macOS, `start-research.command` is a convenience launcher. Before starting th
 checks that `econ_research` imports from this checkout's `src/econ_research`. If a project move
 left the editable installation pointing elsewhere, or the package is missing, the launcher repairs
 it with `conda run -n econ-research python -m pip install -e ".[dev,formula]"`; a correct local
-installation is left untouched. On Windows, use Anaconda Prompt and the platform-neutral server
-command instead:
+installation is left untouched. On Windows, `start-research.cmd` provides the corresponding
+double-click launcher. It checks the current editable-install path, repairs it with
+`conda run -n econ-research python -m pip install -e ".[dev,formula]"` only when needed, and prints
+PyTorch/Paddle CUDA diagnostics before starting the server. Before creating an absent environment
+or downloading dependencies for a repair, it asks for a one-time confirmation. Use Anaconda Prompt
+and the platform-neutral server command instead when a launcher is not wanted:
 
 ```powershell
 conda run -n econ-research research serve
 ```
+
+Windows is supported by the core Python dependencies, but this repository's test suite currently
+runs only on macOS. Test a Windows machine with `conda run -n econ-research pytest` after setup.
+GPU acceleration requires NVIDIA hardware plus matching CUDA-enabled PyTorch and PaddlePaddle
+builds; the standard Docling PDF pipeline selects CUDA automatically when CUDA PyTorch is present,
+while the default `paddlepaddle` package is CPU-oriented. The experimental
+`ECON_RESEARCH_FORMULA_ENRICHMENT` pipeline is MPS-specific and should remain disabled on Windows.
 
 For agents and non-interactive shells, `conda run -n econ-research COMMAND` is the canonical
 form because it does not depend on shell activation. SQLite must support FTS5; the test suite

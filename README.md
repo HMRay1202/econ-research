@@ -66,16 +66,24 @@ project move, or when the package is not installed, it automatically runs
 installation; when the import already points here, it does not reinstall dependencies. Keep the
 terminal window open while using the app; close it or press Control-C to stop the server.
 
-On Windows, run the same server command from **Anaconda Prompt** (or another shell in which Conda
-is available), then open the displayed loopback address in a browser:
+On Windows, double-click `start-research.cmd`, or run it from **Anaconda Prompt**. It performs the
+same port, Conda, and editable-install checks as the macOS launcher, then opens the loopback-only
+workspace. It also prints whether PyTorch and PaddlePaddle can see CUDA. A CPU result is valid: the
+application keeps its CPU fallback and formula OCR remains optional. If the Conda environment is
+missing, or the editable installation must be repaired, it asks for confirmation before downloading
+or installing any Conda/Python packages.
+
+If you prefer to start manually, use Anaconda Prompt (or another shell in which Conda is available)
+and open the displayed loopback address in a browser:
 
 ```powershell
 conda run -n econ-research research serve
 ```
 
-`start-research.command` is a macOS convenience launcher, not a cross-platform requirement. The
-web application, its SQLite data, and the optional formula parser use project-relative runtime
-paths and do not depend on a macOS-only browser integration.
+`start-research.command` and `start-research.cmd` are macOS and Windows convenience launchers,
+respectively, not cross-platform requirements. The web application, its SQLite data, and the
+optional formula parser use project-relative runtime paths and do not depend on a browser
+integration.
 
 `research reparse PAPER_ID` regenerates the stored Markdown and source chunks from the preserved
 original PDF. It is useful after parser improvements: it refreshes paper metadata and page
@@ -96,6 +104,13 @@ The first PaddleOCR Formula run downloads model assets to ignored `data/models/`
 model loading, or one formula crop fails, the paper remains available with Docling text and formula
 diagnostics in its detail view; formula recognition never turns a successful document parse into a
 failed upload.
+
+GPU use is optional. For Windows GPU acceleration, install an NVIDIA driver and CUDA-enabled
+PyTorch/PaddlePaddle builds that match the machine; verify the launcher's CUDA diagnostics before
+expecting acceleration. Standard Docling PDF parsing explicitly uses automatic device selection, so
+it requests CUDA when CUDA PyTorch is available and otherwise falls back to CPU. The current
+experimental CodeFormula path is configured for Apple MPS, so do not enable
+`ECON_RESEARCH_FORMULA_ENRICHMENT=true` on Windows expecting CUDA support.
 
 ## Data and privacy
 

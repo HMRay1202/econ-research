@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from econ_research.parsing.docling_parser import (
     DoclingTextBlock,
     _clean_metadata_title,
+    _default_pipeline_options,
     _formula_pipeline_options,
     _infer_authors,
     _infer_year,
@@ -80,6 +81,12 @@ def test_formula_enrichment_is_enabled_for_pdf_parsing() -> None:
     assert options.code_formula_options.engine_options.device == "mps"
     assert options.code_formula_options.engine_options.load_in_8bit is False
     assert options.code_formula_options.model_spec.max_new_tokens == 512
+
+
+def test_default_pdf_pipeline_uses_detected_accelerator_with_cpu_fallback() -> None:
+    options = _default_pipeline_options()
+
+    assert options.accelerator_options.device == "auto"
 
 
 def test_title_page_metadata_replaces_recognizable_author_and_year() -> None:
