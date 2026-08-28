@@ -22,6 +22,7 @@ class DoclingTextBlock:
     is_heading: bool
     page_start: int | None
     page_end: int | None
+    is_table: bool = False
 
 
 @dataclass(frozen=True)
@@ -100,10 +101,19 @@ class DoclingParser:
                 pdf_path, result.document.texts, on_progress=report_formula_progress
             )
             markdown = apply_formula_replacements(
-                markdown, result.document.texts, formula_result.replacements
+                markdown,
+                result.document.texts,
+                formula_result.replacements,
+                formula_result.raw_fallbacks,
+                formula_result.failed_item_ids,
             )
         overrides = formula_result.replacements if formula_result else {}
-        blocks = docling_text_blocks(result.document.texts, overrides)
+        blocks = docling_content_blocks(
+            result.document,
+            overrides,
+            formula_result.raw_fallbacks if formula_result else None,
+            formula_result.failed_item_ids if formula_result else None,
+        )
         if title_was_repaired:
             blocks = _replace_first_block_heading(blocks, title)
         if on_progress:
@@ -311,11 +321,19 @@ def _infer_year(items: list[object]) -> int | None:
 
 
 def docling_text_blocks(
-    items: list[object], formula_replacements: dict[int, str] | None = None
+    items: list[object],
+    formula_replacements: dict[int, str] | None = None,
+    raw_formula_fallbacks: dict[int, str] | None = None,
+    failed_formula_ids: frozenset[int] | set[int] | None = None,
 ) -> list[DoclingTextBlock]:
     blocks: list[DoclingTextBlock] = []
     for item in items:
-        replacement = text_override(item, formula_replacements or {})
+        replacement = text_override(
+            item,
+            formula_replacements or {},
+            raw_formula_fallbacks,
+            failed_formula_ids,
+        )
         text = (replacement or str(getattr(item, "text", ""))).strip()
         if not text:
             continue
@@ -330,6 +348,53 @@ def docling_text_blocks(
                 is_heading=type(item).__name__ == "SectionHeaderItem",
                 page_start=min(page_numbers) if page_numbers else None,
                 page_end=max(page_numbers) if page_numbers else None,
+            )
+        )
+    return blocks
+
+
+def docling_content_blocks(
+    document: object,
+    formula_replacements: dict[int, str] | None = None,
+    raw_formula_fallbacks: dict[int, str] | None = None,
+    failed_formula_ids: frozenset[int] | set[int] | None = None,
+) -> list[DoclingTextBlock]:
+    """Read Docling's top-level content in document order, including tables.
+
+    ``document.texts`` excludes table cells.  The full Markdown export contains tables, but
+    chunks (and therefore search and LLM prompts) are built from blocks, so tables must be
+    collected from the document's ordered item iterator as well.
+    """
+    blocks: list[DoclingTextBlock] = []
+    replacements = formula_replacements or {}
+    for item, _level in document.iterate_items():
+        label = str(getattr(item, "label", "")).upper()
+        is_table = "TABLE" in label or type(item).__name__ == "TableItem"
+        if is_table:
+            exporter = getattr(item, "export_to_markdown", None)
+            text = exporter(doc=document).strip() if exporter else ""
+        else:
+            replacement = text_override(
+                item,
+                replacements,
+                raw_formula_fallbacks,
+                failed_formula_ids,
+            )
+            text = (replacement or str(getattr(item, "text", ""))).strip()
+        if not text:
+            continue
+        page_numbers = [
+            int(provenance.page_no)
+            for provenance in getattr(item, "prov", [])
+            if getattr(provenance, "page_no", None) is not None
+        ]
+        blocks.append(
+            DoclingTextBlock(
+                text=text,
+                is_heading=type(item).__name__ == "SectionHeaderItem",
+                page_start=min(page_numbers) if page_numbers else None,
+                page_end=max(page_numbers) if page_numbers else None,
+                is_table=is_table,
             )
         )
     return blocks
@@ -380,6 +445,15 @@ def chunk_docling_blocks(
         if block.is_heading:
             flush()
             section = block.text
+            continue
+        if block.is_table:
+            if current and current_length + len(block.text) + 2 > max_chars:
+                flush()
+            current.append(block)
+            current_length += len(block.text) + 2
+            # Keep a table intact even when it is larger than the normal text chunk limit.
+            if current_length > max_chars:
+                flush()
             continue
         if current and current_length + len(block.text) + 2 > max_chars:
             flush()

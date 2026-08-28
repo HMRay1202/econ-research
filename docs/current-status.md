@@ -15,6 +15,8 @@ and persistence must remain in `SQLiteRepository`.
 
 - Import a PDF, preserve an immutable managed copy, parse it with Docling, create source chunks,
   generate Luna research cards, and index papers/cards/chunks in SQLite FTS5.
+- Preserve Docling-detected tables in the ordered source chunks, so table headers and cell values
+  are available to search, card prompts, deep reads, and the source-chunk viewer.
 - Search one local library through CLI and documented `/api/*` routes.
 - Produce on-demand Terra deep reads with stored report history and measured usage telemetry.
 - Browse papers, cards, chunks, searches, managed files, deep reads, and usage in the local UI.
@@ -27,9 +29,11 @@ and persistence must remain in `SQLiteRepository`.
 - For legacy PDFs whose font mapping damages a title, run a focused first-page OCR fallback.
   It updates recognized title, author, and year metadata without replacing the full body with OCR.
 - Optionally recognize mathematical formulas through Docling formula regions plus PaddleOCR
-  Formula. Formula OCR is crop-level rather than full-page OCR; a missing or failed recognizer
-  preserves Docling text and records diagnostics on the paper. The UI's **重新解析公式** control
-  reruns this local, non-billable parsing workflow.
+  Formula. Formula OCR is crop-level rather than full-page OCR and retries failed validation with
+  expanded/high-resolution crops. Unvalidated OCR is retained as a non-rendered fenced `latex`
+  block (or a visible page marker when no text exists), so it remains available to search/chunks
+  and LLM prompts without being treated as executable/renderable math. The UI's **重新解析公式**
+  control reruns this local, non-billable parsing workflow.
 - Queue single or batch uploads with persisted stage progress, detailed backend activity events,
   ten-second liveness heartbeats, elapsed time, and refresh-safe progress restoration. Parser
   callbacks report real milestones such as Docling parsing and per-formula PaddleOCR work rather
@@ -93,7 +97,9 @@ SQLite, runtime directories, `.env`, or an API key directly.
 
 ## Parser quality and known limitation
 
-Page provenance is now preserved for source chunks and inherited by cards when possible. A
+Page provenance is now preserved for source chunks and inherited by cards when possible. Tables
+are serialized as Markdown blocks in the same reading order as surrounding text and retain their
+page range. A
 focused OCR fallback repairs damaged title-page metadata in old PDFs lacking usable Unicode font
 mappings. Formula regions can be selectively converted to LaTex by PaddleOCR Formula after
 Docling layout detection. Dense body text continues to use Docling-native extraction because

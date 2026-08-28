@@ -3,8 +3,9 @@
 - `papers`: stable ID, SHA-256, source filename, managed PDF/Markdown paths, parser metadata,
   status, DOI, archive timestamp, and manually maintained title/year sources. Formula fields store
   the last parse's detected, recognized, fallback counts, status, and bounded diagnostic error.
-- `chunks`: paper-owned normalized source passages with a stable ordinal, section, and optional
-  page range. Reparse replaces these derived records and reconnects cards by ordinal where possible.
+- `chunks`: paper-owned normalized source passages and ordered Markdown table blocks with a stable
+  ordinal, section, and optional page range. Reparse replaces these derived records and reconnects
+  cards where possible.
 - `cards`: paper-owned structured knowledge with optional chunk/page/section provenance. A
   successful regeneration replaces the current card set; prior generation attempts remain tracked.
 - `card_generations`: status, timestamps, generated-card count, and error for every card

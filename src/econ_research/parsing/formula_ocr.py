@@ -7,7 +7,7 @@ import os
 import re
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import import_module
 from pathlib import Path
 from typing import Any, Protocol
@@ -28,6 +28,13 @@ class FormulaCandidate:
 
 
 @dataclass(frozen=True)
+class FormulaCropSpec:
+    scale: float
+    padding: int
+    name: str
+
+
+@dataclass(frozen=True)
 class FormulaEnrichmentResult:
     replacements: dict[int, str]
     detected: int
@@ -35,6 +42,8 @@ class FormulaEnrichmentResult:
     fallback: int
     status: str
     error: str | None = None
+    raw_fallbacks: dict[int, str] = field(default_factory=dict)
+    failed_item_ids: frozenset[int] = frozenset()
 
 
 class PaddleFormulaRecognizer:
@@ -86,7 +95,15 @@ class FormulaOcrUnavailableError(RuntimeError):
 class PdfFormulaCropper:
     """Render only one Docling formula bounding box, never a whole paper as OCR input."""
 
-    def crop(self, pdf_path: Path, candidate: FormulaCandidate, output_path: Path) -> None:
+    def crop(
+        self,
+        pdf_path: Path,
+        candidate: FormulaCandidate,
+        output_path: Path,
+        *,
+        scale: float = 2.0,
+        padding: int = 8,
+    ) -> None:
         try:
             import pypdfium2 as pdfium
         except ImportError as exc:  # pragma: no cover - docling normally provides this
@@ -95,13 +112,12 @@ class PdfFormulaCropper:
         document = pdfium.PdfDocument(str(pdf_path))
         try:
             page = document[candidate.page_no - 1]
-            image = page.render(scale=2.0).to_pil()
+            image = page.render(scale=scale).to_pil()
             page_width, page_height = page.get_size()
             left, top, right, bottom = _bbox_to_pixels(
-                candidate.bbox, float(page_width), float(page_height), 2.0
+                candidate.bbox, float(page_width), float(page_height), scale
             )
-            # Small padding prevents clipped superscripts/subscripts at a detected boundary.
-            padding = 8
+            # Padding prevents clipped superscripts/subscripts and pieces of cases braces.
             left = max(0, left - padding)
             top = max(0, top - padding)
             right = min(image.width, right + padding)
@@ -125,6 +141,11 @@ class FormulaEnricher:
         self.recognizer = recognizer or PaddleFormulaRecognizer()
         self.cropper = cropper or PdfFormulaCropper()
         self.max_formulas = max_formulas
+        self.crop_specs = (
+            FormulaCropSpec(2.0, 8, "standard"),
+            FormulaCropSpec(3.0, 16, "expanded"),
+            FormulaCropSpec(4.0, 24, "high_resolution"),
+        )
 
     def enrich(
         self,
@@ -140,6 +161,8 @@ class FormulaEnricher:
         if isinstance(self.recognizer, PaddleFormulaRecognizer):
             self.recognizer.set_cache_dir(pdf_path.parent.parent / "models" / "paddlex")
         replacements: dict[int, str] = {}
+        raw_fallbacks: dict[int, str] = {}
+        failed_item_ids: set[int] = set()
         errors: list[str] = []
         unavailable = False
         with tempfile.TemporaryDirectory(prefix="econ-research-formula-") as temporary:
@@ -147,23 +170,46 @@ class FormulaEnricher:
             for index, candidate in enumerate(candidates):
                 if on_progress:
                     on_progress(index, len(candidates))
-                image_path = directory / f"formula-{index}.png"
-                try:
-                    self.cropper.crop(pdf_path, candidate, image_path)
-                    formula = normalize_formula_latex(self.recognizer.recognize(image_path))
-                    replacements[candidate.item_id] = formula
-                except FormulaOcrUnavailableError as exc:
-                    unavailable = True
-                    errors.append(str(exc))
-                    logger.info("Formula OCR unavailable; retaining Docling text: %s", exc)
+                raw_formula = ""
+                recognized = False
+                for attempt, spec in enumerate(self.crop_specs):
+                    image_path = directory / f"formula-{index}-{attempt}.png"
+                    try:
+                        self.cropper.crop(
+                            pdf_path,
+                            candidate,
+                            image_path,
+                            scale=spec.scale,
+                            padding=spec.padding,
+                        )
+                        raw_formula = self.recognizer.recognize(image_path).strip()
+                        normalized = normalize_formula_latex(raw_formula)
+                        replacements[candidate.item_id] = normalized
+                        recognized = True
+                        break
+                    except FormulaOcrUnavailableError as exc:
+                        unavailable = True
+                        errors.append(str(exc))
+                        logger.info("Formula OCR unavailable; retaining Docling text: %s", exc)
+                        break
+                    except Exception as exc:
+                        errors.append(
+                            f"page {candidate.page_no} ({spec.name}): "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        logger.warning(
+                            "Formula OCR attempt failed on page %s (%s): %s",
+                            candidate.page_no,
+                            spec.name,
+                            exc,
+                        )
+                if not recognized:
+                    failed_item_ids.add(candidate.item_id)
+                    if raw_formula:
+                        raw_fallbacks[candidate.item_id] = raw_formula
+                if unavailable:
+                    failed_item_ids.update(item.item_id for item in candidates[index + 1 :])
                     break
-                except Exception as exc:
-                    errors.append(f"page {candidate.page_no}: {type(exc).__name__}: {exc}")
-                    logger.warning(
-                        "Formula OCR failed on page %s; retaining Docling text: %s",
-                        candidate.page_no,
-                        exc,
-                    )
                 if on_progress:
                     on_progress(index + 1, len(candidates))
         recognized = len(replacements)
@@ -178,6 +224,8 @@ class FormulaEnricher:
             fallback,
             status,
             "; ".join(errors)[:1000] or None,
+            raw_fallbacks,
+            frozenset(failed_item_ids),
         )
 
 
@@ -223,13 +271,28 @@ def normalize_formula_latex(value: str) -> str:
 
 
 def apply_formula_replacements(
-    markdown: str, items: list[object], replacements: dict[int, str]
+    markdown: str,
+    items: list[object],
+    replacements: dict[int, str],
+    raw_fallbacks: dict[int, str] | None = None,
+    failed_item_ids: frozenset[int] | set[int] | None = None,
 ) -> str:
-    """Replace formula text, or its Docling placeholder, one occurrence at a time."""
+    """Replace formulas while retaining invalid OCR as non-rendered source code."""
     placeholder = "<!-- formula-not-decoded -->"
+    raw_fallbacks = raw_fallbacks or {}
+    failed_item_ids = failed_item_ids or set()
     for item in items:
-        replacement = replacements.get(id(item))
+        item_id = id(item)
+        replacement = replacements.get(item_id)
         original = str(getattr(item, "text", "")).strip()
+        if not replacement and item_id in failed_item_ids:
+            page_no = _item_page(item)
+            raw = raw_fallbacks.get(item_id) or original
+            replacement = (
+                unvalidated_formula_block(raw, page_no)
+                if raw
+                else unavailable_formula_marker(page_no)
+            )
         if not replacement:
             continue
         if original and original in markdown:
@@ -239,8 +302,56 @@ def apply_formula_replacements(
     return markdown
 
 
-def text_override(item: object, replacements: dict[int, str]) -> str | None:
-    return replacements.get(id(item))
+def text_override(
+    item: object,
+    replacements: dict[int, str],
+    raw_fallbacks: dict[int, str] | None = None,
+    failed_item_ids: frozenset[int] | set[int] | None = None,
+) -> str | None:
+    item_id = id(item)
+    replacement = replacements.get(item_id)
+    if replacement:
+        return replacement
+    if failed_item_ids and item_id in failed_item_ids:
+        page_no = _item_page(item)
+        raw = (raw_fallbacks or {}).get(item_id) or str(getattr(item, "text", "")).strip()
+        return (
+            unvalidated_formula_block(raw, page_no)
+            if raw
+            else unavailable_formula_marker(page_no)
+        )
+    return None
+
+
+def unvalidated_formula_block(value: str, page_no: int | None) -> str:
+    """Keep raw formula OCR visible as code so Markdown math rendering cannot reinterpret it."""
+    cleaned = "".join(
+        character for character in value if ord(character) >= 32 or character in "\n\t"
+    )
+    longest_fence = max(
+        (len(match.group(0)) for match in re.finditer(r"`+", cleaned)), default=0
+    )
+    fence = "`" * max(3, longest_fence + 1)
+    page = str(page_no) if page_no is not None else "unknown"
+    return (
+        f"> Formula OCR is incomplete or unvalidated. Verify against the original PDF, "
+        f"page {page}.\n\n"
+        f"{fence}latex\n{cleaned[:4000]}\n{fence}"
+    )
+
+
+def unavailable_formula_marker(page_no: int | None) -> str:
+    page = str(page_no) if page_no is not None else "unknown"
+    return (
+        f"[Formula unavailable on page {page}: no reliable text was extracted. "
+        "Consult the original PDF.]"
+    )
+
+
+def _item_page(item: object) -> int | None:
+    provenance = next(iter(getattr(item, "prov", []) or []), None)
+    page_no = getattr(provenance, "page_no", None)
+    return page_no if isinstance(page_no, int) and page_no >= 1 else None
 
 
 def _bbox_to_pixels(

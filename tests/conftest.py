@@ -28,6 +28,10 @@ The paper uses difference-in-differences. Parallel trends is the key identifying
 ## Results
 
 The estimates report an employment effect with standard errors clustered by state.
+
+| Year | Estimate |
+|---|---:|
+| 2020 | 1.1291 |
 """
         return ParsedDocument(
             title="Employment Effects of a Policy",
@@ -50,7 +54,7 @@ The estimates report an employment effect with standard errors clustered by stat
                     section="Results",
                     text=(
                         "The estimates report an employment effect with standard errors "
-                        "clustered by state."
+                        "clustered by state.\n\n| Year | Estimate |\n|---|---:|\n| 2020 | 1.1291 |"
                     ),
                     page_start=8,
                     page_end=8,

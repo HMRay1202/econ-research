@@ -112,8 +112,9 @@ remain compatible.
   retained as history; the current card set is replaced only after a successful generation.
 - Global cards can be filtered by paper, type, and claim kind, but tag normalization is deferred.
 - Search is lexical FTS5 rather than semantic search.
-- Deep reads and source chunks render safe Markdown and local KaTeX. For a quotation or a
-  formula whose OCR/parse result appears uncertain, consult the original PDF.
+- Deep reads and source chunks render safe Markdown and local KaTeX. Unvalidated formula OCR is
+  displayed as fenced `latex` source code and intentionally excluded from KaTeX rendering; for a
+  quotation or uncertain formula, consult the original PDF.
 - The UI has no user accounts because it is intended for loopback-only use.
 
 Good independent additions are card export, a cross-paper comparison tray, targeted body-text

@@ -65,6 +65,7 @@ def test_offline_end_to_end_workflow(
     search_results = service.search("parallel trends")
     assert {item.entity_type for item in search_results} == {"chunk", "card"}
     assert all(item.paper_id == result.paper.id for item in search_results)
+    assert any(item.entity_type == "chunk" for item in service.search("1.1291"))
 
     deep_read = service.deep_read(result.paper.id, "identification")
     assert "parallel trends" in deep_read.report

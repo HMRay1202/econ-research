@@ -28,5 +28,43 @@
    quality, privacy, and local-model requirements.
 5. Evaluate Zotero integration only when its desired import/synchronization behavior is specified.
 
+## Open issues to investigate
+
+1. **Upload selection cannot be accumulated.** Multiple PDFs can currently be queued only when
+   they are selected together in one file-picker operation. Selecting files again replaces the
+   browser selection instead of appending them to a visible pending queue.
+2. **Batch queues lack per-document detail.** The multi-document upload view does not provide a
+   clear expandable status, stage, event timeline, error, or resulting paper link for each queued
+   document.
+3. **Sleep/wake stability is not yet established.** A native `docling-parse`/QPDF heap-corruption
+   crash has been observed after wake, but current evidence does not prove that sleep caused it.
+   Investigate both deeper system sleep during an active import and the independent native-parser
+   failure mode, including whether the service survives and marks/retries interrupted work safely.
+4. **Refreshing during import can restore an inconsistent web view.** After a page refresh, an
+   unfinished import may be displayed using incomplete or incorrectly decoded intermediate data,
+   including garbled text. Investigate refresh-time task restoration, the boundary between upload
+   status and paper visibility, and ensure parsed content/cards are shown only after their
+   corresponding stage has completed successfully.
+5. **Some malformed formula OCR passes backend validation and surfaces as a KaTeX error.** For
+   example, OCR can return an equation containing nested `$...$` delimiters inside a `$$...$$`
+   block. Brace-count validation accepts it, but the browser displays a visible `ParseError`
+   instead of the intended equation or the unvalidated-code fallback. Investigate render-level
+   validation before persistence and a safe frontend fallback that never exposes raw KaTeX error
+   messages as document content.
+6. **Formula-heavy card details can contain mixed rendering failures and degraded prose.** A card
+   can show one formula as red, unrendered LaTeX, another as literal `$$...$$` source, and nearby
+   explanatory text with mathematical symbols flattened into ambiguous plain text. Investigate
+   whether corruption originates in source chunks, LLM card output, Markdown delimiter handling,
+   or the card-detail renderer; card generation should preserve an explicit unvalidated fallback
+   and the detail view should render or safely display each formula consistently.
+7. **Expanded-crop retries still fail on some detected formulas.** In the current test paper,
+   24 formula regions are detected but only 22 are recognized; both remaining page-13 formulas
+   fail with unbalanced braces at the standard, expanded, and high-resolution attempts. Changing
+   only crop scale and padding is therefore insufficient for these cases. Preserve the raw
+   fallback, capture and compare each attempt's crop/OCR output, and investigate adaptive region
+   correction, image preprocessing, alternate recognition, or explicitly bounded repair before
+   treating additional retries as useful. The UI should also summarize repeated attempt errors
+   without filling the paper header with near-identical diagnostics.
+
 Knowledge graphs, multiple LLM providers, cloud deployment, and orchestration infrastructure
 remain deferred until a concrete research workflow justifies their additional complexity.

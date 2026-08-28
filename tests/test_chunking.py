@@ -12,6 +12,7 @@ from econ_research.parsing.docling_parser import (
     _replace_title_page_metadata,
     chunk_docling_blocks,
     chunk_markdown,
+    docling_content_blocks,
 )
 
 
@@ -50,6 +51,78 @@ def test_chunk_docling_blocks_preserves_section_and_page_ranges() -> None:
         ("Results", 3, 3),
     ]
     assert [chunk.ordinal for chunk in chunks] == [0, 1]
+
+
+def test_docling_content_blocks_include_tables_in_reading_order() -> None:
+    class Table:
+        label = "TABLE"
+        prov = [SimpleNamespace(page_no=6)]
+
+        @staticmethod
+        def export_to_markdown(*, doc) -> str:
+            assert doc is document
+            return "| Year | Estimate |\n|---|---:|\n| 2020 | 1.1291 |"
+
+    document = SimpleNamespace(
+        texts=[],
+        iterate_items=lambda: iter(
+            [
+                (SimpleNamespace(label="SECTION_HEADER", text="Results", prov=[]), 0),
+                (SimpleNamespace(label="TEXT", text="The estimates follow.", prov=[]), 0),
+                (Table(), 0),
+                (
+                    SimpleNamespace(
+                        label="TEXT", text="Source: author calculations.", prov=[]
+                    ),
+                    0,
+                ),
+            ]
+        ),
+    )
+
+    blocks = docling_content_blocks(document)
+
+    assert [block.text for block in blocks] == [
+        "Results",
+        "The estimates follow.",
+        "| Year | Estimate |\n|---|---:|\n| 2020 | 1.1291 |",
+        "Source: author calculations.",
+    ]
+    assert blocks[2].is_table is True
+    assert (blocks[2].page_start, blocks[2].page_end) == (6, 6)
+
+
+def test_table_block_stays_intact_when_chunking() -> None:
+    table = "| Year | Estimate |\n|---|---:|\n| 2020 | 1.1291 |"
+    chunks = chunk_docling_blocks(
+        [
+            DoclingTextBlock("Results", True, 6, 6),
+            DoclingTextBlock(table, False, 6, 6, is_table=True),
+        ],
+        max_chars=20,
+    )
+
+    assert chunks[-1].text == table
+    assert chunks[-1].page_start == 6
+    assert chunks[-1].page_end == 6
+
+
+def test_failed_formula_enters_ordered_blocks_as_non_rendered_code() -> None:
+    formula = SimpleNamespace(
+        label="FORMULA",
+        text="",
+        prov=[SimpleNamespace(page_no=4)],
+    )
+    document = SimpleNamespace(iterate_items=lambda: iter([(formula, 0)]))
+    blocks = docling_content_blocks(
+        document,
+        raw_formula_fallbacks={id(formula): r"\\frac{x{"},
+        failed_formula_ids={id(formula)},
+    )
+    assert len(blocks) == 1
+    assert "```latex" in blocks[0].text
+    assert r"\\frac{x{" in blocks[0].text
+    assert chunk_docling_blocks(blocks)[0].text == blocks[0].text
 
 
 def test_title_page_metadata_helpers_are_conservative() -> None:

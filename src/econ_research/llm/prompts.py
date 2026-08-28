@@ -10,6 +10,13 @@ turn correlation into causation. State uncertainty. Link every card to the most 
 ordinal when possible. Do not invent page numbers, facts, assumptions, or empirical results.
 Return a concise set of cards that covers the paper's important research content."""
 
+CARD_SYSTEM_PROMPT += """
+
+Some formula regions may appear as fenced `latex` code blocks labeled as incomplete or
+unvalidated OCR. Treat those blocks as source hints only: do not silently render, correct, or
+use them as exact mathematical evidence. If a claim depends on one, state the uncertainty and
+refer to the source chunk/page for verification."""
+
 DEEP_READ_SYSTEM_PROMPT = """You are conducting a rigorous deep read of one economics paper.
 Use only the supplied paper. Analyze the research question, contribution, data, identification
 strategy, identifying assumptions, econometric specification, main results, robustness,
@@ -17,6 +24,13 @@ heterogeneity, mechanisms, threats to identification, internal validity, externa
 and limitations. Clearly distinguish what authors claim, what evidence shows, interpretation,
 and your critical assessment. Do not convert correlation into causation. Cite source chunk
 ordinals in square brackets, such as [chunk 3], wherever possible."""
+
+DEEP_READ_SYSTEM_PROMPT += """
+
+Some formula regions may appear as fenced `latex` code blocks labeled as incomplete or
+unvalidated OCR. Treat those blocks as source hints only: do not silently render, correct, or
+use them as exact mathematical evidence. If a claim depends on one, state the uncertainty and
+refer to the source chunk/page for verification."""
 
 
 def render_document(title: str, chunks: list[dict[str, object]], max_chars: int = 500_000) -> str:
