@@ -77,10 +77,14 @@ terminal window open while using the app; close it or press Control-C to stop th
 
 On Windows, double-click `start-research.cmd`, or run it from **Anaconda Prompt**. It performs the
 same port, Conda, and editable-install checks as the macOS launcher, then opens the loopback-only
-workspace. It also prints whether PyTorch and PaddlePaddle can see CUDA. A CPU result is valid: the
-application keeps its CPU fallback and formula OCR remains optional. If the Conda environment is
-missing, or the editable installation must be repaired, it asks for confirmation before downloading
-or installing any Conda/Python packages.
+workspace. Installation and server output are streamed live so a long dependency operation does
+not look stalled. It also prints whether PyTorch and an installed PaddlePaddle can see CUDA. A CPU
+result is valid: the application keeps its CPU fallback and formula OCR remains optional. If the
+Conda environment is missing, or the editable installation must be repaired, it asks for
+confirmation before downloading or installing any Conda/Python packages. The default repair uses
+the core and development dependencies; run `start-research.cmd --with-formula` to install the much
+larger optional formula OCR dependencies, or `start-research.cmd --setup-only` to validate setup
+without starting the server.
 
 If you prefer to start manually, use Anaconda Prompt (or another shell in which Conda is available)
 and open the displayed loopback address in a browser:

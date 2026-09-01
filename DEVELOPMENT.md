@@ -29,11 +29,13 @@ checks that `econ_research` imports from this checkout's `src/econ_research`. If
 left the editable installation pointing elsewhere, or the package is missing, the launcher repairs
 it with `conda run -n econ-research python -m pip install -e ".[dev,formula]"`; a correct local
 installation is left untouched. On Windows, `start-research.cmd` provides the corresponding
-double-click launcher. It checks the current editable-install path, repairs it with
-`conda run -n econ-research python -m pip install -e ".[dev,formula]"` only when needed, and prints
-PyTorch/Paddle CUDA diagnostics before starting the server. Before creating an absent environment
-or downloading dependencies for a repair, it asks for a one-time confirmation. Use Anaconda Prompt
-and the platform-neutral server command instead when a launcher is not wanted:
+double-click launcher. It checks the current editable-install path, repairs the core installation
+with `conda run -n econ-research python -m pip install -e ".[dev]"` only when needed, and prints
+live installation progress plus PyTorch/Paddle diagnostics before starting the server. Formula OCR
+remains opt-in through `start-research.cmd --with-formula`; `--setup-only` validates installation
+without starting the server. Before creating an absent environment or downloading dependencies
+for a repair, it asks for a one-time confirmation. Use Anaconda Prompt and the platform-neutral
+server command instead when a launcher is not wanted:
 
 ```powershell
 conda run -n econ-research research serve
