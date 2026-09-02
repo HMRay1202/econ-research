@@ -1,53 +1,81 @@
 # Workflows
 
-## Ingest
+This document describes behavior, not UI instructions. See the [API contract](api-contracts.md)
+for transport details and the [data model](data-model.md) for persisted states.
 
-Validate the PDF, hash it, reject or return an existing successful import, preserve a private
-copy, parse to Markdown/chunks (including ordered Markdown representations of detected tables),
-generate cards, and commit all database records in a single workflow. Failures mark the paper as
-failed with a diagnostic message.
+## Import and card generation
 
-## Search
+1. Validate the PDF and compute SHA-256. A ready exact match returns the existing paper; a
+   processing match is rejected. A failed match can be retried under its existing identity.
+2. Preserve a managed PDF and create/restart the paper in `processing`.
+3. Run Docling and optional formula OCR. Save Markdown, chunks, formula attempts and the search
+   index, then mark the parsed paper `ready`.
+4. Check possible duplicates by DOI, normalized text and title. Hints do not merge papers.
+5. Create a card-generation attempt and call `ResearchLLM`. Only a successful result replaces
+   current cards. Provider/validation errors handled by this stage mark the generation failed
+   and `card_status=failed` while retaining the parsed paper and any previous cards.
 
-Query the FTS5 index and return ranked paper, card, and source-passage results. Every result
-includes its paper ID and provenance where applicable.
+These are separate filesystem operations and database transactions, not one atomic import.
+A parser or other unhandled ingest failure marks the paper failed and retains available evidence.
+A handled card-generation failure can still leave the upload `succeeded` and paper `ready`:
+inspect `card_status` and generation history instead of assuming upload success means cards exist.
+Retry cards from the stored chunks without reparsing when the paper is ready.
+
+The queue accepts uploads into `incoming/` and executes one at a time in the service process.
+Events report stages and ten-second liveness heartbeats, not a measured percentage of remaining
+work. Normal completion cleans up staging files; forced interruption may leave them behind.
+
+## Formula handling
+
+For detected crops, try standard, expanded, and high-resolution extraction until one result passes
+structural/token checks. Persist attempt diagnostics and retain a failed crop when available.
+A validation pass does not prove mathematical correctness or complete KaTeX compatibility.
+
+The fallback order is validated LaTeX, unvalidated OCR in a fenced `latex` block, Docling source,
+then a retained crop/page marker when available. Some unavailable-dependency cases cannot produce
+a crop or an attempt record. The frontend supplies a code fallback for remaining rendering errors.
+A `partial` formula result does not by itself fail document import.
 
 ## Reparse
 
-Load the managed original PDF for a ready paper and run the current parser again. Replace only
-the generated Markdown and ordered chunk records, including detected tables, then reconnect cards
-to their replacement chunks and fill missing section/page provenance. This workflow never calls the LLM and never
-modifies the source PDF, cards' generated text, or deep-read reports. When configured, it also
-retries PaddleOCR Formula for each Docling-detected formula region and stores formula diagnostics
-on the paper. Recognition is best-effort: only OCR passing structural and supported-command
-heuristics becomes renderable LaTeX; this is not a complete KaTeX or mathematical correctness
-proof. The browser supplies a safe fallback for remaining rendering errors. Failed or
-low-confidence validation is retried with expanded crops; if all
-attempts fail, raw OCR is kept as a non-rendered fenced `latex` block, then Docling text, then a
-retained crop and visible page marker. Every detected formula therefore retains an output for chunks
-and LLM prompts while the model is told to treat it as unvalidated. Regenerate cards separately if corrected formulas
-should be included in card prompts.
+Require a ready paper and read its managed PDF. Replace Markdown, chunks, formula attempts and
+derived search entries. Preserve manual title/year overrides. Reconnect cards by prior chunk
+ordinal when possible; changed reading order can change the meaning of a position.
 
-## Deep read
+Reparse does not call the LLM, rewrite the original PDF, update card text, or regenerate reports.
+Review new source/provenance before requesting a separate billable generation.
+Failures may leave partial filesystem changes; this is not a read-only diagnostic or a global transaction.
 
-Load only the selected paper and its stored source chunks, ask the LLM for an economics-specific
-analysis, save the derived report, and return it. Cross-paper context is not included.
+## Search and deep read
 
-## Upload interruption recovery
+Search uses local FTS5 over papers, chunks and cards, returning ranked results with available
+provenance. It is not semantic retrieval.
 
-The upload queue uses one in-process worker and persisted task records. A process restart must
-reconcile every task that was `queued` or `running`; retaining an old queued record without
-resubmitting it creates a task that the browser can display but no worker can advance. Recovery
-marks such work interrupted for an explicit retry. It also closes running card generations as
-failed while preserving any older completed cards. Interrupted staging files are not treated as
-completed papers.
+Deep read requires a ready paper and sends only that paper's stored source chunks, title, and
+optional focus to the configured LLM. It saves a new database report and Markdown file; existing
+reports remain history. No cross-paper context is added.
 
-## Permanent purge
+## Restart recovery
 
-Permanent purge removes managed diagnostics and files before deleting the database record. If a
-cloud-sync or operating-system lock prevents file removal, the paper remains visible and the purge
-can be retried instead of failing after its database record has already disappeared.
-Windows access-denied errors on read-only managed entries receive one attribute-clearing retry;
-symlinks/junctions, unrelated permission failures, and file-sharing locks are not bypassed. The
-database record is retained on failure, but files already removed by that attempt are not restored.
-Retry tolerates missing files. Normal archive/restore does not perform this destructive workflow.
+Each newly built service reconciles old queued/running uploads to `interrupted` because their
+in-memory worker no longer exists. Running card generations become failed; papers previously
+generating cards become `card_status=ready` when old cards exist, otherwise failed.
+
+Recovery does not automatically replay parsing or billable requests. Confirm the prior outcome
+before re-uploading or retrying. Do not construct a second service against an active database:
+even maintenance CLI commands can invoke this initialization.
+
+## Archive and permanent purge
+
+Archive sets an archive timestamp and hides the paper from the default list; restore reverses it.
+Neither operation removes files or history.
+
+Purge validates managed targets, removes formula diagnostics first, then PDF/Markdown/report
+files, and finally deletes the paper record and its cascading dependents. Windows read-only
+access-denied gets a bounded attribute-clearing retry on eligible entries; it does not grant ACL
+permissions or bypass sharing locks.
+
+On cleanup failure, HTTP 409 preserves the paper record, but already removed files are not restored.
+Retry tolerates missing files. Upload history can remain with null paper references; purge is not
+a promise to erase every historical mention. Recovery of deleted research requires a prior
+[backup](data-storage.md), not reinstalling dependencies.

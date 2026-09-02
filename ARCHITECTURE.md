@@ -1,61 +1,64 @@
 # Architecture
 
-```text
-CLI ------------+
-                +--> ResearchService --> Parser
-FastAPI API ----+                    --> LLM
-                |                    --> SQLiteRepository
-Local web UI ---+ (only through /api/*)
-```
+## Ownership and trust boundaries
 
-The local upload queue is owned by `ResearchService`: it records transfer-independent task status,
-performs duplicate checks, parses, and optionally generates cards. A reparse is separate and local
-only. It refreshes parser output (including optional formula OCR), then reconnects current cards;
-an explicit card generation is required before revised source text reaches an LLM prompt.
+~~~text
+Browser -- HTTP /api/* --> FastAPI --+
+                                   +--> ResearchService --> Parser
+Typer CLI -------------------------+                    --> ResearchLLM
+                                                        --> SQLiteRepository
+~~~
 
-`ResearchService` owns the application workflows. Interfaces only translate input/output and do not
-duplicate research logic. `Parser` converts a PDF to `ParsedDocument`. Its Docling adapter first
-extracts document text and then, when the optional formula dependency is installed, sends only
-Docling-detected formula crops to PaddleOCR Formula. Invalid, unavailable, or failed formula
-recognition falls back to the original Docling text. `ResearchLLM` generates cards and deep reads.
-`SQLiteRepository` persists and searches data.
+The browser does not call the service directly, read SQLite, load environment secrets, or browse
+runtime directories. FastAPI and Typer translate inputs/outputs; all research workflows belong to
+`ResearchService`. The service owns an in-process, single-worker upload queue; there is no external
+queue, database server, or second application backend.
 
-On Windows CUDA profiles, `PaddleFormulaRecognizer` delegates through `paddle_process.py` to
-`paddle_worker.py`, executed by an isolated venv without Torch. The local stdin/stdout protocol
-serializes crop recognition, reuses a model within one parse, and has a 300-second request timeout.
-Worker stderr joins server diagnostics; parse completion/failure closes the worker. This is a
-local parser implementation detail, not another HTTP service or persistence boundary. CPU Windows
-and macOS keep the in-process Paddle path. Both launchers share hardware policy and model-free
-setup under `scripts/`; model weights are loaded/downloaded only by actual parsing.
+The static client is packaged under `web/` with local rendering assets. Only that static directory
+is mounted. File endpoints resolve opaque record IDs through the service and validate managed paths.
+Some legacy `Paper` response fields contain stored paths; clients must not use them as file access
+instructions. This is a loopback-only application, not a multi-user authorization system.
 
-Formula attempt records are stored through `SQLiteRepository` in the additive `formula_attempts`
-table. Diagnostic crop endpoints use paper IDs and formula ordinals, never arbitrary paths.
-On service initialization, orphaned queued/running uploads become interrupted and running card
-generations become failed while prior completed cards remain usable. There is no automatic replay
-of billable calls. Permanent purge validates managed paths, removes diagnostics/files, then deletes
-the record; Windows read-only recovery does not bypass other locks or ACL failures.
+## Parsing and formula isolation
 
-The OpenAI adapter returns the domain result together with measured call metadata. The service
-associates that metadata with the paper and the repository stores it in `llm_calls`; CLI and API
-usage views read the same records. Price rates are copied into each call so historical estimates
-remain stable when the active price table changes. Failed provider calls are recorded when an API
-attempt was made, while local test doubles may omit telemetry.
+`Parser` produces a `ParsedDocument` with ordered chunks, page/section provenance, Markdown,
+and formula diagnostics. Docling supplies native text/layout and ordered table blocks. The
+standard formula path sends only detected crops to PaddleOCR; it does not replace all body text
+with full-page OCR.
 
-The OpenAI implementation is isolated behind one small protocol, but Phase 1 does not build a
-general multi-provider gateway. Provenance is represented by paper, chunk, page, and section
-references where the parser can supply them. Reparsing replaces only generated Markdown/chunks,
-reconnects cards by stable chunk ordinal, and does not invoke `ResearchLLM`. Formula diagnostics
-(detected, recognized, fallback, status, and a bounded error) are persisted with the paper so the
-same result is available to the CLI and `/api/*` clients without exposing runtime files.
+Only structurally accepted formula output becomes renderable LaTeX. When validation fails, the
+pipeline prefers unvalidated OCR in a fenced code block, then retained Docling source, then a
+crop/page marker when available. Missing dependencies preserve usable source rather than forcing
+the entire parse to fail. Validation is heuristic, not a proof of mathematical correctness.
 
-The local web UI is a replaceable static client packaged with the Python application. It owns no
-business logic or persistence. Managed file endpoints accept opaque record IDs, resolve paths in
-the service, and refuse paths outside configured runtime directories; `data/` is never mounted as
-a public static directory. See `docs/frontend.md` and `docs/api-contracts.md` for extension rules.
+On Windows CUDA profiles, `paddle_process.py` starts `paddle_worker.py` through an isolated venv
+without Torch. The worker reads crop/model requests over stdin and returns marked JSON responses
+over stdout; stderr supplies diagnostics. It has no database or LLM access. Requests are serialized,
+reuse a model during one parse, and time out after 300 seconds. Parse completion/failure closes the
+worker; forced termination may bypass cleanup.
 
-The browser client is platform-neutral. `start-research.command` is a macOS launcher and
-`start-research.cmd` is its Windows counterpart. macOS uses `conda run --no-capture-output`, while
-Windows resolves the same Conda environment's Python and runs `-m econ_research.cli serve` directly
-in the foreground console. `conda run -n econ-research research serve` can also be run from an
-Anaconda-enabled shell. Managed PDFs, parsed text, SQLite data, model assets, and temporary upload
-files remain under ignored runtime directories and are never static web assets.
+CPU Windows and macOS use the in-process Paddle path. The launcher policy selects libraries
+before serving; device policy and package details live only in the [runtime guide](docs/runtime-guide.md).
+
+## LLM and persistence
+
+`ResearchLLM` receives source chunks through the service. The OpenAI adapter returns a domain result
+and measured metadata, persisted as `llm_calls` with a price snapshot. Default model configuration
+and network disclosure are in the runtime guide; response shapes are in
+[LLM output](docs/llm-output-schema.md).
+
+`SQLiteRepository` owns SQLite/FTS5 and all SQL. Filesystem writes and database transactions are
+separate: ingest can retain a PDF or parsed content after a later stage fails. Startup recovery
+marks orphaned uploads interrupted and unfinished card generations failed, without replaying calls.
+Do not build another service against a live database solely for diagnostics.
+
+Reparse replaces derived Markdown/chunks and formula attempt records, reconnects cards by ordinal
+when possible, and never rewrites card text or calls an LLM. Ordinal reconnection is not a guarantee
+that reordered source passages still have identical meaning; users should review changed provenance.
+
+Permanent purge validates managed targets, removes diagnostics/files, then deletes the paper record
+and associated records. File cleanup is not rolled back on failure. Windows read-only retry does
+not grant ACL permissions or bypass sharing locks. Upload history can survive with null paper links.
+
+Details belong in [workflows](docs/workflows.md), [data model](docs/data-model.md),
+and [API contracts](docs/api-contracts.md). Scope remains governed by the [charter](PROJECT_CHARTER.md).

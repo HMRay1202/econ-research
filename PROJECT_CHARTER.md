@@ -27,12 +27,15 @@ multiple LLM providers, user accounts, a React frontend, or cloud deployment.
 
 ## Current Phase 1 status
 
-Phase 1 is complete and usable locally. It has been exercised with a real PDF and the local web
-workspace. Source chunks retain section and page provenance when Docling provides it; existing
-papers can be refreshed with `research reparse PAPER_ID` after parser improvements without an LLM
-call. An optional PaddleOCR Formula enhancement converts Docling-detected formula regions to
-LaTeX while retaining a safe Docling fallback. See `docs/current-status.md` for the handoff record
-and next work candidates.
+The Phase 1 functional scope is complete and usable locally. Functional completion does not
+mean every native platform, sleep/wake scenario, or formula extraction has been validated.
+The dated verification baseline is maintained in [current status](docs/current-status.md), and
+remaining work with acceptance criteria is maintained in [ROADMAP](ROADMAP.md).
+
+Local-first means storage, parsing, and retrieval are local; configured card generation and deep
+reads send source text to the model API. Research claims and uncertain formulas must remain
+reviewable against the preserved PDF. Operational and privacy details belong in the
+[runtime guide](docs/runtime-guide.md), not in this scope document.
 
 ## Completion criterion
 

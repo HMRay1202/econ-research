@@ -1,137 +1,67 @@
 # Local Web Frontend
 
-## Purpose and boundaries
+## Boundary and source layout
 
-The local frontend is a thin client for the existing FastAPI application. It is deliberately
-implemented with plain HTML, CSS, and JavaScript so it adds no Node build, frontend framework,
-authentication, cloud deployment, or parallel business-logic layer. The browser must use
-documented `/api/*` endpoints; it must never read SQLite, runtime paths, `.env`, or an API key.
+The browser is a thin plain-HTML/CSS/JavaScript client. It calls documented `/api/*` routes and
+does not own persistence or research logic. It must not read SQLite, environment secrets or
+arbitrary runtime paths. See [API contracts](api-contracts.md) before changing requests.
 
-Start it with:
+`web/index.html` supplies page regions; `app.js` owns client state and rendering; `styles.css`
+owns presentation. Fixed-version Marked, DOMPurify, KaTeX, fonts and license notices live under
+`web/vendor/`. FastAPI serves `/` and mounts only those assets at `/assets`, not `data/`.
+Assets are package data; no Node build or rendering CDN is required.
 
-```bash
-conda run -n econ-research research serve
-```
+Startup instructions belong in the [README](../README.md) and [runtime guide](runtime-guide.md).
 
-Open `http://127.0.0.1:8000/`. Keep the default loopback host for private local use. The API
-console remains available at `http://127.0.0.1:8000/docs`.
+## User interactions
 
-## Source layout
+- Single/batch upload, task-stage progress and restoration of active tasks on refresh.
+- Paper listing, card filtering, source-chunk inspection and local search.
+- Original PDF and parsed Markdown access through managed file routes.
+- Separate card-generation retry and non-billable reparse.
+- Manual title/year overrides preserved during reparse.
+- Archive/restore and explicitly confirmed permanent deletion.
+- Billable deep-read requests, report history/download and usage views.
 
-```text
-src/econ_research/web/
-├── index.html   # stable page regions and accessible controls
-├── styles.css   # responsive presentation; no generated CSS
-├── app.js       # API client, local view state, and DOM rendering
-└── vendor/       # fixed-version Marked, DOMPurify, KaTeX, fonts, and license notices
-```
+On purge failure, keep the selected paper and show the service error. Do not hide it optimistically
+before the DELETE request succeeds. Archive and purge must remain visibly different operations.
 
-`api.py` serves `index.html` at `/` and mounts the directory at `/assets`. `pyproject.toml`
-includes these files as package data, so the installed `research serve` command works outside an
-editable checkout as well.
+Upload completion and card-generation success are distinct; a ready parsed paper can need a card
+retry. Restore persisted jobs via `GET /api/uploads` rather than creating fake paper placeholders.
+State semantics live in [workflows](workflows.md), not in a second client-side implementation.
 
-## Current product surface
+## Safe rendering
 
-- Single or batch PDF upload with browser transfer progress and persisted local task-stage output.
-- Card-generation retry: a parsed paper remains available if the billable Luna call fails.
-- Paper list and paper detail metadata.
-- Card browsing, type filtering, text filtering, and source-chunk inspection.
-- Cross-paper FTS5 search.
-- Safe original-PDF and parsed-Markdown access.
-- On-demand Terra deep reads with an explicit cost confirmation.
-- Deep-read history, report display, and Markdown download.
-- Global and per-paper token, latency, estimated-cost, and status-history views.
-- Soft remove and restore for papers; the library toggle reveals removed entries without exposing
-  managed file paths or permanently deleting research materials.
-- A selected paper can be renamed or have its year edited through **修改标题** and **修改年份**.
-  Each change is marked as manual, updates library search, and remains in place if the source PDF
-  is reparsed.
-- **重新解析公式** retries the non-billable parser pipeline from the preserved original PDF; users
-  explicitly regenerate cards afterward if the revised text should become LLM input.
+Ordinary strings, including card titles, use `textContent`. Card content, source chunks and
+deep-read reports use one shared `renderMarkdown` path:
 
-Most dynamic strings are assigned through `textContent`. Card content, deep-read reports and source chunks are
-the deliberate exception: the shared `renderMarkdown` helper first parses local Markdown with
-Marked, removes raw HTML, sanitizes the resulting document with DOMPurify, then renders LaTeX
-delimiters with local KaTeX. It allows only document-oriented Markdown elements and safe
-`http`, `https`, and `mailto` links; scripts, event attributes, forms, iframes, SVG, images, and
-embedded media are not rendered. Do not bypass this helper with `innerHTML`.
+1. Preserve math delimiters needed across Markdown parsing.
+2. Parse with local Marked, remove raw HTML and sanitize with DOMPurify.
+3. Render math with local KaTeX using `trust: false` and `throwOnError: false`.
+4. Replace remaining KaTeX error nodes with text-only unvalidated LaTeX and a source-PDF reminder.
 
-The web package includes fixed-version third-party assets under `web/vendor/`, so rendering does
-not require a CDN, Node build, or network connection. KaTeX uses `throwOnError: false` and
-`trust: false`: malformed parser/OCR LaTeX remains visible instead of breaking a report, and
-untrusted formula commands cannot opt into privileged output. Before Markdown parsing, the helper
-temporarily preserves `\\[...\\]` and `\\(...\\)` delimiters because ordinary Markdown would otherwise
-treat their backslashes as escapes before KaTeX sees them.
+Allow only document-oriented elements and safe HTTP/HTTPS/mailto links. Scripts, event handlers,
+forms, iframes, SVG, images and embedded media are not rendered. Do not bypass the helper with
+unsanitized `innerHTML`.
 
-### Markdown and mathematics rendering
+Recognize `$...$`, `$$...$$`, `\(...\)` and `\[...\]`. Fenced/inline code stays non-rendered.
+Wide display equations can scroll rather than alter stored source. Unvalidated OCR is evidence,
+not executable mathematics, and should remain code rather than forced KaTeX output.
 
-Rendering is presentation-only and applies to card content, displayed deep-read reports, and the
-source chunk dialog. Card titles and other ordinary UI strings continue to use `textContent`. The renderer
-accepts GitHub-flavored Markdown and recognizes `$...$`, `$$...$$`, `\\(...\\)`, and `\\[...\\]` LaTeX
-delimiters. Display equations can scroll horizontally on narrow screens rather than changing the
-stored source text.
+A `[chunk N]` reference becomes a source button only for a known chunk in the current paper.
+References inside links or code remain text. This presentation feature does not alter report
+Markdown or add a persistence contract.
 
-After sanitization and before mathematics rendering, a report reference in the form `[chunk N]`
-becomes a button only when chunk `N` belongs to the paper currently loaded in the browser. Selecting
-it opens that stored source chunk. References inside links, inline code, or code blocks remain plain
-text. This is a client-side convenience only; it neither changes deep-read Markdown nor adds a
-route or persistence contract.
+## Testing and extension
 
-When KaTeX rejects an otherwise stored formula, the client replaces its error node with a sanitized
-unvalidated-LaTeX code block and a source-PDF reminder. It must never display KaTeX's raw error text
-as document content. Cards use the same safe Markdown/math path for their content.
+Add service/API tests before extending the visual surface. Cover failure states, nullable
+provenance, additive fields, retained selection on failed deletion, and the shared rendering path.
+Source-level assertions are useful but do not replace native browser regression checks with
+malformed formulas, Markdown and untrusted HTML.
 
-The asset versions and license notices are recorded in `web/vendor/THIRD_PARTY_NOTICES.md`. Keep
-these assets local and versioned together; do not replace them with a CDN URL or introduce a Node
-build solely for Markdown rendering.
+Keep third-party assets and [license notices](../src/econ_research/web/vendor/THIRD_PARTY_NOTICES.md)
+versioned together. Do not add a frontend framework or build pipeline without an explicit need.
 
-Upload jobs are server-side records. On page load, the client requests `GET /api/uploads` and
-resumes polling queued or running jobs, so refreshing during parsing restores the visible backend
-stage message instead of creating a replacement placeholder.
-
-## Extension rules
-
-1. Add persistence reads or writes to `SQLiteRepository` first.
-2. Expose the use case through `ResearchService`.
-3. Define public Pydantic response models in `models.py`.
-4. Add or extend an `/api/*` route and document it in `api-contracts.md`.
-5. Consume only that API from `web/app.js`.
-6. Add API/service tests before changing the visual surface.
-
-Do not import repository code into `api.py` or duplicate query logic in JavaScript. Preserve
-existing response fields when adding features. A future React/Vue/Svelte client can replace the
-contents of `web/` without changing the service and repository layers as long as the API contracts
-remain compatible.
-
-## Known limitations and good next changes
-
-- Parser output prefers a credible PDF metadata title before layout extraction, preserves
-  source-chunk page ranges, and uses a title-page OCR fallback when legacy PDF font mappings
-  damage the title. With optional `.[formula]`, Docling formula boxes are cropped and passed to
-  PaddleOCR Formula. Invalid, failed, or unavailable recognition keeps Docling text and records a
-  formula error; the older `ECON_RESEARCH_FORMULA_ENRICHMENT=true` CodeFormula path remains
-  experimental and opt-in. Dense body text remains Docling-native because full-page OCR can
-  introduce new transcription errors; consult the original PDF for quotations.
-- Cards cannot yet be edited, approved, or exported as a collection. Generation attempts are
-  retained as history; the current card set is replaced only after a successful generation.
-- Global cards can be filtered by paper, type, and claim kind, but tag normalization is deferred.
-- Search is lexical FTS5 rather than semantic search.
-- Deep reads, source chunks, and cards render safe Markdown and local KaTeX. Unvalidated formula OCR is
-  displayed as fenced `latex` source code and intentionally excluded from KaTeX rendering; for a
-  quotation or uncertain formula, consult the original PDF.
-- The UI has no user accounts because it is intended for loopback-only use.
-
-Good independent additions are card export, a cross-paper comparison tray, targeted body-text
-normalization with confidence checks, and optional semantic search. Keep each behind a service method and additive API so
-parallel work does not couple to the current frontend implementation.
-
-## Verification
-
-```bash
-conda run -n econ-research ruff check .
-conda run -n econ-research pytest
-conda run -n econ-research research serve
-```
-
-Verify `/`, `/assets/app.js`, `/health`, `/api/papers`, and one paper's cards without invoking an
-LLM. A real deep-read UI test is billable and should run only when explicitly authorized.
+Open UX and rendering work belongs in [ROADMAP](../ROADMAP.md); platform verification belongs in
+[current status](current-status.md). A real deep-read test is networked and billable, unlike
+read-only checks of existing reports.

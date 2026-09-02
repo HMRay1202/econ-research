@@ -1,119 +1,87 @@
 # Development
 
-Use Python 3.11 in the `econ-research` Conda environment. Do not modify Conda `base` or the
-macOS system Python. Confirm or create the environment with:
+This guide is for contributors. For installation choices and GPU troubleshooting, use the
+[runtime guide](docs/runtime-guide.md); for local data, use [storage and backup](docs/data-storage.md).
 
-```bash
+## Prepare an environment
+
+Work from the current repository root on every platform, using the Conda environment
+`econ-research` with Python 3.11. Never install into Conda `base` or system Python.
+
+~~~text
 conda env list
-conda env create -f environment.yml  # only when econ-research is absent
-conda activate econ-research
-python -m pip install -e ".[dev]"
-python --version
-```
+conda env create -f environment.yml
+~~~
 
-For the supported platform-aware runtime setup, use the shared installer from the repository
-root. Stop the service before installing or repairing packages:
+Run the second command only if the environment is absent. Choose one setup path:
 
-```bash
-conda run --no-capture-output -n econ-research python scripts/setup_runtime.py --install
-conda run --no-capture-output -n econ-research python scripts/setup_runtime.py
-```
+- Offline/unit-test development without formula runtime management:
+  `conda run -n econ-research python -m pip install -e ".[dev]"`.
+- Full application development with hardware-aware libraries:
+  `conda run --no-capture-output -n econ-research python scripts/setup_runtime.py --install`.
 
-The first command installs libraries; the second verifies imports and tiny device operations
-without installing packages or loading OCR models. `--without-formula` skips optional formula
-libraries during setup, but does not uninstall them or disable an existing OCR configuration.
-Use `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to disable recognition at runtime.
+Both install development dependencies. Stop the service before changing installed packages.
+The shared setup script selects platform libraries; do not manually combine CPU/GPU Paddle or
+install the legacy `.[formula-gpu]` extra into the main Windows environment.
 
-On supported Windows NVIDIA systems, Torch stays in `econ-research` and Paddle GPU runs in an
-isolated `<econ-research>/paddle-worker` venv with no Torch. This avoids conflicting cuDNN DLLs.
-CPU Windows and macOS use CPU Paddle in the main environment; macOS Torch can use native MPS.
-Do not install the legacy `.[formula-gpu]` extra into the main Windows environment, or install
-CPU and GPU Paddle together. See the runtime profile table in [README.md](README.md).
+## Run checks
 
-The first formula parse downloads PaddleOCR model assets into the ignored `data/models/` runtime
-directory. On a machine where the optional dependency is unavailable, imports still succeed and
-Docling's extracted formula text is retained; the paper records the unavailable/failed formula
-status instead of failing the complete import. Set `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to
-disable the optional step deliberately.
-
-On macOS, `start-research.command` is a convenience launcher. Before starting the server, it
-checks that `econ_research` imports from this checkout's `src/econ_research`. If a project move
-left the editable installation pointing elsewhere, or the package is missing, the launcher repairs
-it through `scripts/setup_runtime.py --install` after confirmation; a correct local installation
-is left untouched. `start-research.cmd` provides the Windows double-click launcher. Both install
-formula libraries by default, support `--without-formula`, and support `--setup-only` without
-starting a new server. The macOS launcher returns immediately when it finds an existing compatible
-service; stop that service before using setup-only for a fresh check. Windows streams installation
-progress and GPU diagnostics, then runs the environment's Python directly in the console so
-Ctrl+C reaches Uvicorn. For an existing Windows server, choose restart, stop, read-only logs, or
-quit. `stop-research.cmd` is the confirmed, identity-checked termination fallback for a hidden
-server; it refuses active uploads, but users must also finish reparse/card/deep-read work first.
-Use Anaconda Prompt and the platform-neutral server command when a launcher is not wanted:
-
-```powershell
-conda run -n econ-research research serve
-```
-
-The 2026-09-02 Windows verification passed 107 offline tests and Ruff, including native CMD and
-PowerShell checks, real read-only-directory cleanup, and mocked process-control safety checks.
-An RTX 5070 Ti Laptop GPU also passed isolated Paddle GPU inference and a real PDF import.
-Native macOS, clean CPU-only installation, and CUDA 12.6 hardware validation remain outstanding;
-policy tests on Windows are not substitutes for those runs. The experimental
-`ECON_RESEARCH_FORMULA_ENRICHMENT` path selects CUDA, then MPS, then CPU FP32 and remains off by
-default; it is separate from the standard Paddle formula path.
-
-For agents and non-interactive shells, `conda run -n econ-research COMMAND` is the canonical
-form because it does not depend on shell activation. SQLite must support FTS5; the test suite
-verifies this.
-
-Configuration is loaded from environment variables and an optional local `.env`. Runtime
-directories are created on demand. Never commit `.env`, databases, PDFs, parsed paper text, or
-generated reports.
-
-LLM routing is explicit: card generation defaults to `gpt-5.6-luna` with low reasoning, while
-deep reads default to `gpt-5.6-terra` with medium reasoning. `OPENAI_DEFAULT_MODEL` is the
-fallback for an operation-specific blank model; `OPENAI_MODEL` is accepted for compatibility.
-
-Every real OpenAI call stores returned token counts, latency, status, request identifier, and a
-price snapshot in SQLite. Costs are estimates based on the configured model price table; unknown
-models remain explicitly unpriced. Reasoning tokens are reported separately but are already part
-of output tokens and are not billed twice. Inspect totals or individual calls with:
-
-```bash
-research usage
-research usage --details
-research usage --paper-id PAPER_ID --operation deep_read
-```
-
-Run checks with:
-
-```bash
+~~~text
 conda run -n econ-research ruff check .
 conda run -n econ-research pytest
-```
+conda run -n econ-research python -m pip check
+~~~
 
-An offline end-to-end test uses test doubles for parsing and the LLM. A real end-to-end run
-requires a PDF and `OPENAI_API_KEY`:
+Tests use temporary fixtures and parser/LLM doubles by default. Native Windows tests exercise CMD,
+PowerShell and file attributes; passing platform-policy tests does not prove native macOS or GPU
+installation success. The dated results belong in [current status](docs/current-status.md), not
+in each installation document.
 
-```bash
-research ingest /absolute/path/to/sample.pdf
-research reparse PAPER_ID
-research search "a term known to occur in the paper"
-research deep-read PAPER_ID
-```
+Do not run a real ingest, deep read, or card regeneration merely to test documentation. Real
+model calls require explicit authorization and a configured key. Inspect usage before/after an
+authorized call; for an active backend use its usage API/UI rather than building another service
+against the same database. CLI commands that construct `ResearchService` also run startup recovery.
 
-The first real Docling conversion may download model assets and therefore take longer than
-later ingestions. Keep downloaded models and runtime paper data outside version control.
-Reparsing is local and non-billable: it uses the preserved PDF, refreshes parsed Markdown and
-chunk provenance, and reconnects existing cards without calling the LLM.
-It also retries formula OCR. It does not rewrite existing card text, so regenerate cards only
-after reviewing the revised source text; that regeneration is an LLM call and may be billable.
-For parser diagnosis, inspect `formula_status` and `formula_error` in the paper response or web
-detail view before changing dependencies or disabling formula OCR.
-Schema initialization is additive (`CREATE ... IF NOT EXISTS`) so an existing Phase 1 database
-gains new tables without discarding papers. Future incompatible changes require an explicit
-migration rather than database deletion.
+## Run and debug
 
-For the pending GitHub publication scope, verification evidence, and privacy checks, see
-[docs/release-readiness.md](docs/release-readiness.md). Do not treat a passing local suite as a
-cross-platform CI result or as evidence that a commit has already been pushed.
+Use the platform launcher for interactive work or, from the repository root:
+
+~~~text
+conda run --no-capture-output -n econ-research research serve
+~~~
+
+Do not start a second instance against the same database. Read the actual foreground output, not
+an old redirected log. Stop the service before editing an executing CMD launcher, updating the
+checkout, repairing dependencies, or copying a database backup.
+
+To debug OCR, inspect paper formula counts/status and the attempt endpoint before changing
+packages. A `partial` result is not a server failure. Use local synthetic fixtures rather than
+committing real PDFs, extracted text, credentials, request IDs, or database snapshots.
+
+A reparse is non-billable but mutates derived text and provenance; it is not a read-only diagnostic.
+Existing cards keep their text. Regeneration is a separate, potentially billable operation.
+
+## Change discipline
+
+1. Keep CLI and HTTP adapters behind `ResearchService`, persistence behind `SQLiteRepository`,
+   and provider calls behind `ResearchLLM`.
+2. Update [workflows](docs/workflows.md) when behavior changes and
+   [data model](docs/data-model.md) when persistence changes.
+3. Keep browser-facing changes additive; update [API contracts](docs/api-contracts.md) and tests.
+4. Use the shared sanitized renderer for Markdown; follow [frontend rules](docs/frontend.md).
+5. Add offline regression tests. Record native validation gaps honestly.
+6. Update the owning document from the [documentation index](docs/index.md), linking rather than
+   copying hardware profiles, setup commands, or roadmap entries everywhere.
+
+Schema changes must be additive or explicitly migrated. Never delete runtime data to make tests
+or a new schema work. Git ignores runtime data but is not a substitute for reviewing staged files.
+
+## Commit and publish
+
+Review `git status --short --branch` and the actual diff, including untracked files.
+Stage only intended source, tests, and documentation. Check `git diff --cached --check` and
+scan for secrets, runtime data, binaries, and unexpected deletions before committing.
+
+A local commit is not a push. Push only when requested, without force; verify the remote SHA,
+then update the [change record](CHANGELOG.md) and [current status](docs/current-status.md).
+The old [publication audit](docs/release-readiness.md) is historical evidence, not a new release instruction.

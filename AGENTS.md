@@ -1,6 +1,7 @@
 # Repository Instructions
 
-- Work from the repository root: `/Users/minrui/Library/CloudStorage/OneDrive-RutgersUniversity/Rutgers-OD/Paper_Research`.
+- Work from the current checkout's repository root on every platform. Do not assume a user's
+  absolute macOS or Windows path; resolve the root before running project-relative commands.
 - Keep Phase 1 small and follow `PROJECT_CHARTER.md`.
 - CLI and HTTP handlers must call the shared `ResearchService`.
 - The local web client must call documented `/api/*` routes. Never access SQLite, `.env`, runtime
@@ -17,6 +18,9 @@
   it, then run `python -m pip install -e ".[dev]"`.
 - Add or update tests for behavior changes, and run relevant checks.
 - Update documentation when commands, configuration, architecture, or schemas change.
+- Use `docs/index.md` to find the owning document; link to it instead of duplicating volatile
+  setup, release, or validation facts. Keep current status separate from historical release audits.
+- Write project documentation in English.
 - Never commit API keys, `.env`, PDFs, databases, parsed paper text, or generated reports.
 - Treat real LLM tests as networked and billable. Use offline test doubles by default, and
   inspect `research usage --details` after an authorized real call.
