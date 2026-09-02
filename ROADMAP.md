@@ -11,6 +11,7 @@ P1 covers reliability and data trust, P2 covers usability/quality, and P3 covers
 
 | Priority | Work | Acceptance criteria |
 | --- | --- | --- |
+| P1 | Audit Docling article-structure extraction and reliability | Trace the current version, models, configuration and project post-processing from PDF layout/text through reading order, heading/section detection, Markdown and source chunks; document the signals and rules used, compare representative economics papers with manually reviewed structure, and assess omissions, misordering, section boundaries, tables/formulas and page provenance; deliver an evidence-backed keep/change recommendation with prioritized fixes and offline regression cases where needed |
 | P1 | Native macOS, clean Windows CPU-only, CUDA 12.6 | On each target: install/check without downloading OCR weights, exercise first-use models, parse a fixture, verify expected device/fallback, run tests and stop cleanly |
 | P1 | Native parser and sleep/wake stability | Reproduce or isolate the observed docling-parse/QPDF heap-corruption failure; separate correlation from cause; document survival/recovery and preserve originals |
 | P1 | Interrupted tasks and lifecycle cleanup | Queued/running work leaves no permanently active orphan; users can retry without automatic billable replay; audit incoming files and worker cleanup after crash/forced stop |
