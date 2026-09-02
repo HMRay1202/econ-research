@@ -26,7 +26,7 @@ Phase 1 is complete and usable locally. Its full scope and deferred work are def
 ```bash
 conda env create -f environment.yml
 conda activate econ-research
-python -m pip install -e ".[dev]"
+python scripts/setup_runtime.py --install
 cp .env.example .env
 ```
 
@@ -70,9 +70,10 @@ port 8000 and asks you to stop it before opening a potentially stale interface.
 On macOS, you can instead double-click `start-research.command` in Finder. It locates the existing
 `econ-research` Conda environment, verifies that its editable `econ_research` import points to this
 project's `src/econ_research`, starts the loopback-only server, and opens the workspace. After a
-project move, or when the package is not installed, it automatically runs
-`conda run -n econ-research python -m pip install -e ".[dev,formula]"` once to repair the editable
-installation; when the import already points here, it does not reinstall dependencies. Keep the
+project move, or when libraries are missing, it offers to run
+`conda run -n econ-research python scripts/setup_runtime.py --install` to repair the editable
+installation and platform runtimes. A missing Conda environment can also be created after
+confirmation. Successful checks do not reinstall dependencies. Keep the
 terminal window open while using the app; close it or press Control-C to stop the server.
 
 On Windows, double-click `start-research.cmd`, or run it from **Anaconda Prompt**. It performs the
@@ -81,10 +82,30 @@ workspace. Installation and server output are streamed live so a long dependency
 not look stalled. It also prints whether PyTorch and an installed PaddlePaddle can see CUDA. A CPU
 result is valid: the application keeps its CPU fallback and formula OCR remains optional. If the
 Conda environment is missing, or the editable installation must be repaired, it asks for
-confirmation before downloading or installing any Conda/Python packages. The default repair uses
-the core and development dependencies; run `start-research.cmd --with-formula` to install the much
-larger optional formula OCR dependencies, or `start-research.cmd --setup-only` to validate setup
-without starting the server.
+confirmation before downloading or installing any Conda/Python packages. By default it installs
+core, development, and formula OCR libraries, and repairs missing formula libraries even when the
+editable project is already installed. Checks import libraries and perform a tiny convolution;
+they never instantiate an OCR model or download model weights. Use `start-research.cmd --setup-only`
+to prepare libraries
+without starting the server, or `--without-formula` for an explicit minimal installation.
+`--with-formula` remains a compatibility alias. If a server is already running, checks still run,
+but package repair requires stopping that server first. Conda itself must already be installed.
+When the server is already running, the Windows launcher offers **R** (stop and restart in this
+window), **S** (stop), **L** (read-only logs), or **Q** (leave it running). A new foreground server
+runs directly in this console: **Ctrl+C** requests a graceful Uvicorn shutdown. For an old hidden
+server, double-click `stop-research.cmd` (or use `start-research.cmd --stop` without expensive GPU
+checks). Stopping an existing process requires typing `STOP`, verifies the port owner against this
+environment and checkout's editable package, and refuses while upload jobs are active. This
+fallback terminates the process, so finish reparse/card/deep-read requests first; prefer Ctrl+C
+in the original terminal whenever available. It never kills all Python processes or a process tree.
+The optional log viewer watches `data/server-windows.stdout.log` and `data/server-windows.stderr.log`;
+Ctrl+C there closes only the viewer. A foreground server logs in its original terminal, not those
+old redirected files. `--setup-only` still exits after validation.
+
+Permanent deletion handles Windows read-only files and diagnostic directories with a bounded
+retry inside managed paths, without following symlinks/junctions or changing ACLs. Other file
+locks still return 409 and preserve the database record; the backend logs the underlying error.
+The Windows-only retry does not change macOS deletion behavior.
 
 If you prefer to start manually, use Anaconda Prompt (or another shell in which Conda is available)
 and open the displayed loopback address in a browser:
@@ -106,24 +127,62 @@ cards. Review the refreshed text before relying on it for quotations.
 Formula recognition uses a safe two-stage path. Docling identifies formula regions while the
 optional PaddleOCR Formula module converts only those cropped regions to LaTeX. Failed formulas,
 or a missing PaddleOCR installation, retain Docling's original text and never fail an upload.
-Install it with `python -m pip install -e '.[formula]'`; this installs PaddleOCR, PaddlePaddle,
-and its formula-text cleanup dependency. `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` disables this
+Install the hardware-appropriate libraries with
+`conda run -n econ-research python scripts/setup_runtime.py --install` while the service is stopped.
+The manual `.[formula]` extra is the CPU Paddle alternative, not the managed Windows GPU setup;
+do not add it to a configured GPU installation. See the runtime profiles below.
+`ECON_RESEARCH_PADDLE_FORMULA_OCR=false` disables this
 step. The older `ECON_RESEARCH_FORMULA_ENRICHMENT=true` CodeFormula path remains experimental and
 is off by default because its accuracy and latency vary by PDF. Use **重新解析公式** to retry the
 non-billable local parse from a preserved original PDF, then explicitly regenerate cards if the
 updated formulas should be included in LLM input.
 
-The first PaddleOCR Formula run downloads model assets to ignored `data/models/`. If installation,
+The first actual formula recognition downloads missing model assets to ignored
+`data/models/paddlex/official_models/`; existing cached models are reused. Installing libraries,
+running setup checks, or simply opening the web app does not download models. If installation,
 model loading, or one formula crop fails, the paper remains available with Docling text and formula
 diagnostics in its detail view; formula recognition never turns a successful document parse into a
 failed upload.
 
+Both launchers use `scripts/setup_runtime.py` for model-free checks and `--install` for repair.
+`scripts/runtime_policy.py` detects the operating system, NVIDIA driver, and compute capability:
+
+| Host | Installed runtime |
+| --- | --- |
+| Windows x64, supported NVIDIA GPU and driver 580+ | Torch CUDA 13 in `econ-research`; Paddle GPU CUDA 13 in its dedicated worker |
+| Windows x64, supported pre-Blackwell GPU and driver 560.76+ | Torch/Paddle CUDA 12.6, with Paddle isolated |
+| Windows without a supported GPU/driver | CPU Torch and CPU Paddle |
+| macOS | Native Torch (MPS when available) and CPU Paddle; no CUDA worker |
+
+The supported CUDA profiles require compute capability 7.5 or newer; CUDA 12.6 is not selected
+for Blackwell. Unsupported/undetected hardware prints a CPU fallback reason. Existing compatible
+installations are checked rather than reinstalled. macOS native wheels are resolved for that
+machine; platform-policy tests run on Windows, but macOS installation needs native verification.
+
+Windows CUDA Paddle runs in a persistent local subprocess using an isolated venv at
+`<econ-research>/paddle-worker`, created by the main Conda Python. The worker has no Torch
+installation, does not read the database, reuses the project's existing model cache, and returns
+formula results over stdin/stdout. Its diagnostics appear in the backend log. Requests time out
+after 300 seconds; worker failure retains the existing Docling fallback. The model is reused
+within one document; completing/failing that document closes its worker to release GPU memory.
+Normal shutdown also closes workers; forced process termination cannot guarantee cleanup.
+Selection requires a model-free GPU convolution check.
+`ECON_RESEARCH_PADDLE_PYTHON` can explicitly select a dedicated worker interpreter.
+
+This avoids the verified cuDNN DLL conflict between Windows Torch 2.9.1/cu130 (cuDNN 9.12) and
+Paddle 3.3.1/cu130 (cuDNN 9.13), without modifying third-party DLLs. The legacy `formula-gpu`
+extra is not the Windows managed installation path: do not install it into the main environment.
+CPU `paddlepaddle` and `paddlepaddle-gpu` must never coexist in the same environment. Stop the
+service before package repair; the installer refuses to repair while port 8000's health endpoint
+is running. Model weights still download only on first actual recognition.
+
 GPU use is optional. For Windows GPU acceleration, install an NVIDIA driver and CUDA-enabled
 PyTorch/PaddlePaddle builds that match the machine; verify the launcher's CUDA diagnostics before
 expecting acceleration. Standard Docling PDF parsing explicitly uses automatic device selection, so
-it requests CUDA when CUDA PyTorch is available and otherwise falls back to CPU. The current
-experimental CodeFormula path is configured for Apple MPS, so do not enable
-`ECON_RESEARCH_FORMULA_ENRICHMENT=true` on Windows expecting CUDA support.
+it can use supported CUDA or Apple MPS devices and otherwise falls back to CPU. The experimental
+CodeFormula path selects CUDA first, then Apple MPS, and finally CPU; FP16 is limited to CUDA/MPS
+while CPU uses FP32. Platform-specific accelerator packages are intentionally not forced by the
+shared environment file, so one checkout remains usable on macOS and Windows.
 
 ## Data and privacy
 
@@ -141,3 +200,5 @@ conda run -n econ-research pytest
 See [DEVELOPMENT.md](DEVELOPMENT.md), [ARCHITECTURE.md](ARCHITECTURE.md), and
 [PROJECT_CHARTER.md](PROJECT_CHARTER.md). Frontend maintainers should also read
 [docs/frontend.md](docs/frontend.md) and [docs/api-contracts.md](docs/api-contracts.md).
+The pending publication scope and dated verification record are in
+[docs/release-readiness.md](docs/release-readiness.md).

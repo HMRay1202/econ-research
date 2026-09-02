@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from econ_research.parsing.docling_parser import (
     DoclingTextBlock,
     _clean_metadata_title,
@@ -10,6 +12,7 @@ from econ_research.parsing.docling_parser import (
     _looks_damaged,
     _prefer_pdf_metadata_title,
     _replace_title_page_metadata,
+    _select_formula_accelerator,
     chunk_docling_blocks,
     chunk_markdown,
     docling_content_blocks,
@@ -146,14 +149,42 @@ def test_pdf_metadata_title_is_preferred_over_out_of_order_body_text() -> None:
     assert _clean_metadata_title("  Untitled  ") is None
 
 
-def test_formula_enrichment_is_enabled_for_pdf_parsing() -> None:
+def test_formula_enrichment_is_enabled_for_pdf_parsing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "econ_research.parsing.docling_parser._select_formula_accelerator",
+        lambda: ("cuda", "float16"),
+    )
     options = _formula_pipeline_options()
     assert options.do_formula_enrichment is True
-    assert options.accelerator_options.device == "mps"
+    assert options.accelerator_options.device == "cuda"
     assert options.document_timeout == 180
-    assert options.code_formula_options.engine_options.device == "mps"
+    assert options.code_formula_options.engine_options.device == "cuda"
     assert options.code_formula_options.engine_options.load_in_8bit is False
     assert options.code_formula_options.model_spec.max_new_tokens == 512
+
+
+@pytest.mark.parametrize(
+    ("cuda_available", "mps_available", "expected_device", "expected_dtype"),
+    [
+        (True, False, "cuda", "float16"),
+        (False, True, "mps", "float16"),
+        (False, False, "cpu", "float32"),
+    ],
+)
+def test_formula_accelerator_is_cross_platform(
+    cuda_available, mps_available, expected_device, expected_dtype
+) -> None:
+    fake_torch = SimpleNamespace(
+        cuda=SimpleNamespace(is_available=lambda: cuda_available),
+        backends=SimpleNamespace(
+            mps=SimpleNamespace(is_available=lambda: mps_available),
+        ),
+    )
+
+    device, dtype = _select_formula_accelerator(fake_torch)
+
+    assert device == expected_device
+    assert dtype == expected_dtype
 
 
 def test_default_pdf_pipeline_uses_detected_accelerator_with_cpu_fallback() -> None:

@@ -11,12 +11,24 @@ python -m pip install -e ".[dev]"
 python --version
 ```
 
-Formula-aware parsing is optional because PaddlePaddle is a platform-specific dependency. Install
-it into the same environment when testing or using formula recognition:
+For the supported platform-aware runtime setup, use the shared installer from the repository
+root. Stop the service before installing or repairing packages:
 
 ```bash
-conda run -n econ-research python -m pip install -e '.[formula]'
+conda run --no-capture-output -n econ-research python scripts/setup_runtime.py --install
+conda run --no-capture-output -n econ-research python scripts/setup_runtime.py
 ```
+
+The first command installs libraries; the second verifies imports and tiny device operations
+without installing packages or loading OCR models. `--without-formula` skips optional formula
+libraries during setup, but does not uninstall them or disable an existing OCR configuration.
+Use `ECON_RESEARCH_PADDLE_FORMULA_OCR=false` to disable recognition at runtime.
+
+On supported Windows NVIDIA systems, Torch stays in `econ-research` and Paddle GPU runs in an
+isolated `<econ-research>/paddle-worker` venv with no Torch. This avoids conflicting cuDNN DLLs.
+CPU Windows and macOS use CPU Paddle in the main environment; macOS Torch can use native MPS.
+Do not install the legacy `.[formula-gpu]` extra into the main Windows environment, or install
+CPU and GPU Paddle together. See the runtime profile table in [README.md](README.md).
 
 The first formula parse downloads PaddleOCR model assets into the ignored `data/models/` runtime
 directory. On a machine where the optional dependency is unavailable, imports still succeed and
@@ -27,26 +39,28 @@ disable the optional step deliberately.
 On macOS, `start-research.command` is a convenience launcher. Before starting the server, it
 checks that `econ_research` imports from this checkout's `src/econ_research`. If a project move
 left the editable installation pointing elsewhere, or the package is missing, the launcher repairs
-it with `conda run -n econ-research python -m pip install -e ".[dev,formula]"`; a correct local
-installation is left untouched. On Windows, `start-research.cmd` provides the corresponding
-double-click launcher. It checks the current editable-install path, repairs the core installation
-with `conda run -n econ-research python -m pip install -e ".[dev]"` only when needed, and prints
-live installation progress plus PyTorch/Paddle diagnostics before starting the server. Formula OCR
-remains opt-in through `start-research.cmd --with-formula`; `--setup-only` validates installation
-without starting the server. Before creating an absent environment or downloading dependencies
-for a repair, it asks for a one-time confirmation. Use Anaconda Prompt and the platform-neutral
-server command instead when a launcher is not wanted:
+it through `scripts/setup_runtime.py --install` after confirmation; a correct local installation
+is left untouched. `start-research.cmd` provides the Windows double-click launcher. Both install
+formula libraries by default, support `--without-formula`, and support `--setup-only` without
+starting a new server. The macOS launcher returns immediately when it finds an existing compatible
+service; stop that service before using setup-only for a fresh check. Windows streams installation
+progress and GPU diagnostics, then runs the environment's Python directly in the console so
+Ctrl+C reaches Uvicorn. For an existing Windows server, choose restart, stop, read-only logs, or
+quit. `stop-research.cmd` is the confirmed, identity-checked termination fallback for a hidden
+server; it refuses active uploads, but users must also finish reparse/card/deep-read work first.
+Use Anaconda Prompt and the platform-neutral server command when a launcher is not wanted:
 
 ```powershell
 conda run -n econ-research research serve
 ```
 
-Windows is supported by the core Python dependencies, but this repository's test suite currently
-runs only on macOS. Test a Windows machine with `conda run -n econ-research pytest` after setup.
-GPU acceleration requires NVIDIA hardware plus matching CUDA-enabled PyTorch and PaddlePaddle
-builds; the standard Docling PDF pipeline selects CUDA automatically when CUDA PyTorch is present,
-while the default `paddlepaddle` package is CPU-oriented. The experimental
-`ECON_RESEARCH_FORMULA_ENRICHMENT` pipeline is MPS-specific and should remain disabled on Windows.
+The 2026-09-02 Windows verification passed 107 offline tests and Ruff, including native CMD and
+PowerShell checks, real read-only-directory cleanup, and mocked process-control safety checks.
+An RTX 5070 Ti Laptop GPU also passed isolated Paddle GPU inference and a real PDF import.
+Native macOS, clean CPU-only installation, and CUDA 12.6 hardware validation remain outstanding;
+policy tests on Windows are not substitutes for those runs. The experimental
+`ECON_RESEARCH_FORMULA_ENRICHMENT` path selects CUDA, then MPS, then CPU FP32 and remains off by
+default; it is separate from the standard Paddle formula path.
 
 For agents and non-interactive shells, `conda run -n econ-research COMMAND` is the canonical
 form because it does not depend on shell activation. SQLite must support FTS5; the test suite
@@ -99,3 +113,7 @@ detail view before changing dependencies or disabling formula OCR.
 Schema initialization is additive (`CREATE ... IF NOT EXISTS`) so an existing Phase 1 database
 gains new tables without discarding papers. Future incompatible changes require an explicit
 migration rather than database deletion.
+
+For the pending GitHub publication scope, verification evidence, and privacy checks, see
+[docs/release-readiness.md](docs/release-readiness.md). Do not treat a passing local suite as a
+cross-platform CI result or as evidence that a commit has already been pushed.

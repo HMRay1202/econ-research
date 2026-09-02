@@ -57,6 +57,32 @@ class ParsedDocument(BaseModel):
     formula_fallback: int = Field(default=0, ge=0)
     formula_status: str = "not_run"
     formula_error: str | None = None
+    formula_extractions: list[FormulaExtraction] = Field(default_factory=list)
+
+
+class FormulaAttempt(BaseModel):
+    formula_ordinal: int = Field(ge=0)
+    page_no: int = Field(ge=1)
+    crop_name: str
+    scale: float = Field(gt=0)
+    padding: int = Field(ge=0)
+    raw_output: str | None = None
+    normalized_output: str | None = None
+    validation_status: str
+    error_code: str | None = None
+    error_message: str | None = None
+    selected: bool = False
+    crop_filename: str | None = None
+
+
+class FormulaExtraction(BaseModel):
+    ordinal: int = Field(ge=0)
+    page_no: int = Field(ge=1)
+    status: str
+    raw_ocr: str | None = None
+    source_text: str | None = None
+    crop_filename: str | None = None
+    attempts: list[FormulaAttempt] = Field(default_factory=list)
 
 
 class ResearchCardDraft(BaseModel):

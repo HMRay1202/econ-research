@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -12,7 +13,37 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any, Protocol
 
+from econ_research.models import FormulaAttempt, FormulaExtraction
+from econ_research.parsing.paddle_process import PaddleProcess, check_worker, worker_python
+
 logger = logging.getLogger(__name__)
+
+
+def check_formula_dependencies() -> None:
+    """Import libraries only, in a Windows-safe order; never construct/download a model."""
+    python = worker_python()
+    if python is not None:
+        check_worker(python)
+        return
+    # Paddle and CUDA PyTorch ship overlapping native libraries on Windows. Loading
+    # PyTorch first avoids Paddle's DLLs shadowing dependencies of torch/lib/shm.dll.
+    for module_name in ("torch", "paddle", "ftfy"):
+        import_module(module_name)
+    _ = import_module("paddleocr").FormulaRecognition
+    # A base paddleocr import can succeed even when formula preprocessing extras are absent.
+    import_module("paddlex.utils.deps").require_extra("ocr", obj_name="Formula OCR")
+
+
+def select_paddle_device(paddle_module=None) -> str:
+    """Use Paddle's own CUDA capability, not PyTorch's; retain the macOS/CPU path."""
+    if paddle_module is None:
+        paddle_module = import_module("paddle")
+    try:
+        if paddle_module.is_compiled_with_cuda() and paddle_module.device.cuda.device_count() > 0:
+            return "gpu:0"
+    except Exception as exc:
+        logger.warning("Paddle CUDA detection failed; using CPU: %s", exc)
+    return "cpu"
 
 
 class FormulaRecognizer(Protocol):
@@ -22,6 +53,7 @@ class FormulaRecognizer(Protocol):
 @dataclass(frozen=True)
 class FormulaCandidate:
     item_id: int
+    ordinal: int
     text: str
     page_no: int
     bbox: object
@@ -44,6 +76,15 @@ class FormulaEnrichmentResult:
     error: str | None = None
     raw_fallbacks: dict[int, str] = field(default_factory=dict)
     failed_item_ids: frozenset[int] = frozenset()
+    extractions: list[FormulaExtraction] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class FormulaValidationResult:
+    valid: bool
+    normalized: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 class PaddleFormulaRecognizer:
@@ -65,22 +106,35 @@ class PaddleFormulaRecognizer:
         if self._pipeline is None:
             self.cache_dir = cache_dir
 
+    def close(self) -> None:
+        if isinstance(self._pipeline, PaddleProcess):
+            self._pipeline.close()
+            self._pipeline = None
+
     def recognize(self, image_path: Path) -> str:
+        if self._pipeline is None:
+            python = worker_python()
+            if python is not None:
+                self._pipeline = PaddleProcess(
+                    python, self.model_name,
+                    self.cache_dir or Path("data/models/paddlex").resolve(),
+                )
         if self._pipeline is None:
             if self.cache_dir is not None:
                 # PaddleX otherwise writes under ~/.paddlex, which is both machine-global and
                 # outside this application's managed runtime directory.
                 os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(self.cache_dir))
             try:
-                for module_name in ("paddle", "paddleocr", "ftfy"):
-                    import_module(module_name)
+                check_formula_dependencies()
                 from paddleocr import FormulaRecognition
             except ImportError as exc:  # pragma: no cover - depends on optional runtime
                 raise FormulaOcrUnavailableError(
                     f"PaddleOCR Formula dependency is missing ({exc.name}). Run: "
                     "python -m pip install -e '.[formula]'"
                 ) from exc
-            self._pipeline = FormulaRecognition(model_name=self.model_name)
+            device = select_paddle_device()
+            logger.info("Paddle formula recognition device: %s", device)
+            self._pipeline = FormulaRecognition(model_name=self.model_name, device=device)
         for result in self._pipeline.predict(str(image_path)):
             value = _find_formula_value(_as_mapping(result))
             if value:
@@ -163,15 +217,20 @@ class FormulaEnricher:
         replacements: dict[int, str] = {}
         raw_fallbacks: dict[int, str] = {}
         failed_item_ids: set[int] = set()
+        extractions: list[FormulaExtraction] = []
         errors: list[str] = []
         unavailable = False
+        diagnostics_dir = pdf_path.parent.parent / "diagnostics" / "formulas" / pdf_path.stem
         with tempfile.TemporaryDirectory(prefix="econ-research-formula-") as temporary:
             directory = Path(temporary)
             for index, candidate in enumerate(candidates):
                 if on_progress:
                     on_progress(index, len(candidates))
                 raw_formula = ""
+                best_raw_formula = ""
                 recognized = False
+                attempts: list[FormulaAttempt] = []
+                selected_crop: Path | None = None
                 for attempt, spec in enumerate(self.crop_specs):
                     image_path = directory / f"formula-{index}-{attempt}.png"
                     try:
@@ -183,8 +242,30 @@ class FormulaEnricher:
                             padding=spec.padding,
                         )
                         raw_formula = self.recognizer.recognize(image_path).strip()
-                        normalized = normalize_formula_latex(raw_formula)
-                        replacements[candidate.item_id] = normalized
+                        if raw_formula:
+                            best_raw_formula = raw_formula
+                        validation = validate_formula_latex(raw_formula)
+                        attempts.append(
+                            FormulaAttempt(
+                                formula_ordinal=candidate.ordinal,
+                                page_no=candidate.page_no,
+                                crop_name=spec.name,
+                                scale=spec.scale,
+                                padding=spec.padding,
+                                raw_output=raw_formula[:4000] or None,
+                                normalized_output=validation.normalized,
+                                validation_status="validated" if validation.valid else "rejected",
+                                error_code=validation.error_code,
+                                error_message=validation.error_message,
+                            )
+                        )
+                        if not validation.valid:
+                            raise ValueError(
+                                validation.error_message or "formula validation failed"
+                            )
+                        replacements[candidate.item_id] = validation.normalized or ""
+                        attempts[-1] = attempts[-1].model_copy(update={"selected": True})
+                        selected_crop = image_path
                         recognized = True
                         break
                     except FormulaOcrUnavailableError as exc:
@@ -193,6 +274,21 @@ class FormulaEnricher:
                         logger.info("Formula OCR unavailable; retaining Docling text: %s", exc)
                         break
                     except Exception as exc:
+                        if not attempts or attempts[-1].crop_name != spec.name:
+                            attempts.append(
+                                FormulaAttempt(
+                                    formula_ordinal=candidate.ordinal,
+                                    page_no=candidate.page_no,
+                                    crop_name=spec.name,
+                                    scale=spec.scale,
+                                    padding=spec.padding,
+                                    raw_output=raw_formula[:4000] or None,
+                                    normalized_output=None,
+                                    validation_status="error",
+                                    error_code=type(exc).__name__,
+                                    error_message=str(exc)[:500],
+                                )
+                            )
                         errors.append(
                             f"page {candidate.page_no} ({spec.name}): "
                             f"{type(exc).__name__}: {exc}"
@@ -205,10 +301,48 @@ class FormulaEnricher:
                         )
                 if not recognized:
                     failed_item_ids.add(candidate.item_id)
-                    if raw_formula:
-                        raw_fallbacks[candidate.item_id] = raw_formula
+                    if best_raw_formula:
+                        raw_fallbacks[candidate.item_id] = best_raw_formula
+                    selected_crop = image_path if image_path.is_file() else None
+                crop_filename = _retain_diagnostic_crop(
+                    selected_crop, diagnostics_dir, candidate.ordinal, recognized
+                )
+                if attempts and crop_filename:
+                    attempts[-1] = attempts[-1].model_copy(update={"crop_filename": crop_filename})
+                source_text = candidate.text or None
+                extraction_status = (
+                    "validated"
+                    if recognized
+                    else "unvalidated"
+                    if best_raw_formula
+                    else "source_fallback"
+                    if source_text
+                    else "image_fallback"
+                )
+                extractions.append(
+                    FormulaExtraction(
+                        ordinal=candidate.ordinal,
+                        page_no=candidate.page_no,
+                        status=extraction_status,
+                        raw_ocr=best_raw_formula[:4000] or None,
+                        source_text=source_text,
+                        crop_filename=crop_filename,
+                        attempts=attempts,
+                    )
+                )
                 if unavailable:
-                    failed_item_ids.update(item.item_id for item in candidates[index + 1 :])
+                    for remaining in candidates[index + 1 :]:
+                        failed_item_ids.add(remaining.item_id)
+                        extractions.append(
+                            FormulaExtraction(
+                                ordinal=remaining.ordinal,
+                                page_no=remaining.page_no,
+                                status="source_fallback"
+                                if remaining.text
+                                else "image_fallback",
+                                source_text=remaining.text or None,
+                            )
+                        )
                     break
                 if on_progress:
                     on_progress(index + 1, len(candidates))
@@ -226,6 +360,7 @@ class FormulaEnricher:
             "; ".join(errors)[:1000] or None,
             raw_fallbacks,
             frozenset(failed_item_ids),
+            extractions,
         )
 
 
@@ -243,31 +378,127 @@ def formula_candidates(items: list[object]) -> list[FormulaCandidate]:
         # as ``<!-- formula-not-decoded -->``.  It is exactly the case that needs image OCR.
         if not isinstance(page_no, int) or page_no < 1 or bbox is None:
             continue
-        candidates.append(FormulaCandidate(id(item), text, page_no, bbox))
+        candidates.append(FormulaCandidate(id(item), len(candidates), text, page_no, bbox))
     return candidates
 
 
 def normalize_formula_latex(value: str) -> str:
+    """Compatibility wrapper for callers that expect invalid input to raise ValueError."""
+    result = validate_formula_latex(value)
+    if not result.valid:
+        raise ValueError(result.error_message or "formula validation failed")
+    assert result.normalized is not None
+    return result.normalized
+
+
+def validate_formula_latex(value: str) -> FormulaValidationResult:
+    """Conservatively normalize OCR output without accepting unrenderable LaTeX."""
     formula = value.strip()
     if formula.startswith("$$") and formula.endswith("$$"):
         formula = formula[2:-2].strip()
     elif formula.startswith("$") and formula.endswith("$"):
         formula = formula[1:-1].strip()
+    formula = re.sub(r"\\eqno\s*\(([^()]*)\)", r"\\tag{\1}", formula)
+    formula = formula.replace(r"\upgamma", r"\gamma")
+    formula = re.sub(r"\\operatorname\*\{m\s+a\s+x\}", r"\\max", formula)
+    formula = re.sub(r"\\operatorname\*\{l\s+i\s+m\}", r"\\lim", formula)
+    formula = re.sub(r"\\mathrm\{w\s+h\s+e\s+r\s+e\}", r"\\mathrm{where}", formula)
+    formula = re.sub(r"\\mathrm\{a\s+n\s+d\}", r"\\mathrm{and}", formula)
     # Formula OCR occasionally places a punctuation mark immediately before a closing
     # subscript/superscript brace (for example ``x_{t+r,}``). This is not valid content and
     # differs from legitimate interior comma-separated indices such as ``x_{i,j}``.
     formula = re.sub(r",(?=})", "", formula)
     if not formula or len(formula) > 4_000:
-        raise ValueError("formula is empty or exceeds the safety limit")
+        return FormulaValidationResult(
+            False, error_code="length", error_message="formula is empty or exceeds the safety limit"
+        )
     if any(ord(character) < 32 and character not in "\n\t" for character in formula):
-        raise ValueError("formula contains control characters")
+        return FormulaValidationResult(
+            False,
+            error_code="control_characters",
+            error_message="formula contains control characters",
+        )
     if re.search(r"\d{60,}", formula):
-        raise ValueError("formula contains an implausibly long digit run")
+        return FormulaValidationResult(
+            False,
+            error_code="digit_run",
+            error_message="formula contains an implausibly long digit run",
+        )
     if not re.search(r"[A-Za-z0-9\\]", formula):
-        raise ValueError("formula has no recognizable mathematical content")
-    if formula.count("{") != formula.count("}"):
-        raise ValueError("formula has unbalanced braces")
-    return f"$$\n{formula}\n$$"
+        return FormulaValidationResult(
+            False,
+            error_code="no_content",
+            error_message="formula has no recognizable mathematical content",
+        )
+    if "$" in formula:
+        return FormulaValidationResult(
+            False,
+            error_code="nested_delimiter",
+            error_message="formula contains a nested math delimiter",
+        )
+    error = _validate_formula_structure(formula)
+    if error:
+        return FormulaValidationResult(False, error_code="structure", error_message=error)
+    if _looks_low_confidence(formula):
+        return FormulaValidationResult(
+            False,
+            error_code="low_confidence",
+            error_message="formula contains repeated or split OCR tokens",
+        )
+    return FormulaValidationResult(True, normalized=f"$$\n{formula}\n$$")
+
+
+def _validate_formula_structure(formula: str) -> str | None:
+    braces: list[int] = []
+    environments: list[str] = []
+    left_right = 0
+    for match in re.finditer(
+        r"\\(?:begin|end)\{([^{}]+)\}|\\(?:left|right)\b|(?<!\\)[{}]", formula
+    ):
+        token = match.group(0)
+        if token == "{":
+            braces.append(match.start())
+        elif token == "}":
+            if not braces:
+                return "formula has an unexpected closing brace"
+            braces.pop()
+        elif token.startswith(r"\begin"):
+            environments.append(match.group(1) or "")
+        elif token.startswith(r"\end"):
+            if not environments or environments.pop() != (match.group(1) or ""):
+                return "formula has an unbalanced LaTeX environment"
+        elif token == r"\left":
+            left_right += 1
+        elif token == r"\right":
+            left_right -= 1
+            if left_right < 0:
+                return "formula has an unmatched \\right delimiter"
+    if braces:
+        return "formula has unbalanced braces"
+    if environments:
+        return "formula has an unbalanced LaTeX environment"
+    if left_right:
+        return "formula has an unmatched \\left delimiter"
+    return None
+
+
+def _looks_low_confidence(formula: str) -> bool:
+    repeated_ones = formula.count(r"\left(1\right)")
+    if repeated_ones >= 3:
+        return True
+    return bool(re.search(r"\\(?:operatorname\*|mathrm)\{(?:[A-Za-z]\s+){3,}[A-Za-z]\}", formula))
+
+
+def _retain_diagnostic_crop(
+    crop: Path | None, directory: Path, ordinal: int, validated: bool
+) -> str | None:
+    """Keep only non-validated evidence; normal successful crops remain temporary."""
+    if validated or crop is None or not crop.is_file():
+        return None
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"formula-{ordinal}.png"
+    shutil.copy2(crop, target)
+    return target.name
 
 
 def apply_formula_replacements(

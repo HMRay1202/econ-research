@@ -1,0 +1,3 @@
+# Keep both launchers executable by their native shells after a cross-platform checkout.
+*.command text eol=lf
+*.cmd text eol=crlf

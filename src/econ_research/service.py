@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import shutil
+import stat
 import threading
 import time
 from collections.abc import Callable
@@ -132,11 +134,19 @@ class ResearchService:
         self.parsed_dir = parsed_dir
         self.generated_dir = generated_dir
         self.incoming_dir = originals_dir.parent / "incoming"
-        for directory in (originals_dir, parsed_dir, generated_dir, self.incoming_dir):
+        self.formula_diagnostics_dir = originals_dir.parent / "diagnostics" / "formulas"
+        for directory in (
+            originals_dir,
+            parsed_dir,
+            generated_dir,
+            self.incoming_dir,
+            self.formula_diagnostics_dir,
+        ):
             directory.mkdir(parents=True, exist_ok=True)
         self.repository.initialize()
         self.repository.interrupt_running_jobs()
         self.repository.recover_orphaned_processing_papers()
+        self.repository.recover_orphaned_card_generations()
         self._jobs = ThreadPoolExecutor(max_workers=1, thread_name_prefix="econ-research-ingest")
 
     def ingest(
@@ -405,10 +415,24 @@ class ResearchService:
             )
             for deep_read_id in deep_read_ids
         )
-        self.repository.delete_paper(paper_id)
+        # Remove the diagnostic tree first because cloud-synced directories are the most
+        # likely operation to be temporarily locked. Keep the database record until every
+        # managed file is gone so a failed purge remains visible and can be retried.
+        diagnostics = self.formula_diagnostics_dir / paper_id
+        if diagnostics.exists():
+            shutil.rmtree(
+                self._managed_directory(diagnostics, self.formula_diagnostics_dir),
+                onerror=lambda operation, path, info: _retry_windows_readonly(
+                    operation, Path(path), info[1], self.formula_diagnostics_dir
+                ),
+            )
         for path in managed_paths:
             if path is not None:
-                path.unlink()
+                try:
+                    path.unlink(missing_ok=True)
+                except PermissionError as exc:
+                    _retry_windows_readonly(os.unlink, path, exc, path.parent)
+        self.repository.delete_paper(paper_id)
 
     def search(self, query: str, limit: int = 20):
         return self.repository.search(query, limit)
@@ -498,6 +522,28 @@ class ResearchService:
         self.get_paper(paper_id)
         return self.repository.list_source_chunks(paper_id)
 
+    def list_formula_attempts(self, paper_id: str):
+        self.get_paper(paper_id)
+        return self.repository.list_formula_attempts(paper_id)
+
+    def formula_crop_path(self, paper_id: str, formula_ordinal: int) -> Path:
+        if formula_ordinal < 0:
+            raise FileNotFoundError("Formula crop not found")
+        self.get_paper(paper_id)
+        attempts = self.repository.list_formula_attempts(paper_id)
+        filename = next(
+            (
+                attempt.crop_filename
+                for attempt in attempts
+                if attempt.formula_ordinal == formula_ordinal and attempt.crop_filename
+            ),
+            None,
+        )
+        if not filename:
+            raise FileNotFoundError("Formula crop not available")
+        path = self.formula_diagnostics_dir / paper_id / filename
+        return self._managed_file(str(path), self.formula_diagnostics_dir)
+
     def list_deep_reads(self, paper_id: str) -> list[DeepReadSummary]:
         self.get_paper(paper_id)
         return self.repository.list_deep_reads(paper_id)
@@ -568,6 +614,40 @@ class ResearchService:
         if not candidate.is_relative_to(managed_root):
             raise ValueError("Stored file path is outside the managed data directory")
         return candidate if candidate.is_file() else None
+
+    @staticmethod
+    def _managed_directory(path: Path, root: Path) -> Path:
+        candidate = path.resolve()
+        managed_root = root.resolve()
+        if not candidate.is_relative_to(managed_root):
+            raise ValueError("Stored diagnostic path is outside the managed data directory")
+        return candidate
+
+
+def _retry_windows_readonly(operation, path: Path, error: BaseException, root: Path) -> None:
+    """Retry only Windows access-denied on a managed, non-link, read-only entry."""
+    if (
+        os.name != "nt"
+        or not isinstance(error, PermissionError)
+        or getattr(error, "winerror", 0) != 5
+    ):
+        raise error
+    candidate = path.resolve()
+    managed_root = root.resolve()
+    if candidate == managed_root or not candidate.is_relative_to(managed_root):
+        raise error
+    metadata = path.lstat()
+    if path.is_symlink() or getattr(metadata, "st_reparse_tag", 0) == 0xA0000003:
+        raise error  # Never change permissions through a symlink or directory junction.
+    if not metadata.st_file_attributes & stat.FILE_ATTRIBUTE_READONLY:
+        raise error  # File locks and ACL failures must remain visible and retryable.
+    os.chmod(path, stat.S_IWRITE)
+    try:
+        operation(path)
+    except OSError:
+        if path.exists():
+            os.chmod(path, stat.S_IREAD)
+        raise
 
 
 def _sha256(path: Path) -> str:

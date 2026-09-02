@@ -22,7 +22,7 @@ def test_api_uses_shared_service(service: ResearchService, sample_pdf: Path) -> 
     assert client.get("/assets/vendor/katex.min.js").status_code == 200
     assert client.get("/assets/vendor/fonts/KaTeX_Main-Regular.woff2").status_code == 200
     assert client.get("/health").json() == {"status": "ok"}
-    assert client.get("/api/ui-version").json()["version"] == "2026-08-27-markdown-math-v1"
+    assert client.get("/api/ui-version").json()["version"] == "2026-08-28-formula-fallback-v1"
     with sample_pdf.open("rb") as handle:
         response = client.post(
             "/api/papers", files={"file": ("paper.pdf", handle, "application/pdf")}
@@ -54,6 +54,8 @@ def test_api_uses_shared_service(service: ResearchService, sample_pdf: Path) -> 
     chunks = client.get(f"/api/papers/{paper_id}/chunks")
     assert chunks.status_code == 200
     assert len(chunks.json()) == 2
+    assert client.get(f"/api/papers/{paper_id}/formula-attempts").json() == []
+    assert client.get(f"/api/papers/{paper_id}/formulas/0/crop").status_code == 404
 
     original = client.get(f"/api/papers/{paper_id}/files/original")
     assert original.status_code == 200
@@ -90,6 +92,38 @@ def test_api_rejects_non_pdf_upload(service: ResearchService) -> None:
         "/api/papers", files={"file": ("notes.txt", b"private notes", "text/plain")}
     )
     assert response.status_code == 400
+
+
+def test_purge_file_lock_is_retryable_and_preserves_paper(
+    service: ResearchService, sample_pdf: Path, monkeypatch
+) -> None:
+    paper = service.ingest(sample_pdf).paper
+    diagnostics = service.formula_diagnostics_dir / paper.id
+    diagnostics.mkdir(parents=True)
+    client = TestClient(create_app(service))
+
+    def locked_tree(*args, **kwargs):
+        raise PermissionError("private filesystem path")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("econ_research.service.shutil.rmtree", locked_tree)
+        response = client.delete(f"/api/papers/{paper.id}/purge")
+
+    assert response.status_code == 409
+    assert "论文记录已保留" in response.json()["detail"]
+    assert "private filesystem path" not in response.text
+    assert client.get(f"/api/papers/{paper.id}").status_code == 200
+    assert client.delete(f"/api/papers/{paper.id}/purge").status_code == 204
+
+
+def test_frontend_keeps_selected_paper_when_purge_fails(service: ResearchService) -> None:
+    script = TestClient(create_app(service)).get("/assets/app.js").text
+    purge = script.split("async function permanentlyDeletePaper()", 1)[1].split(
+        "async function generateDeepRead", 1
+    )[0]
+    assert purge.index("await api(") < purge.index("state.selectedPaper = null")
+    assert "catch (error)" in purge
+    assert "showError(error)" in purge
 
 
 def test_api_queued_upload_card_regeneration_and_archive(
@@ -170,6 +204,9 @@ def test_frontend_renders_sanitized_markdown_and_math(service: ResearchService) 
     assert "renderMathInElement(container" in script.text
     assert "throwOnError: false" in script.text
     assert "trust: false" in script.text
+    assert "function replaceMathErrors(container)" in script.text
+    assert "formula-fallback" in script.text
+    assert "function renderCardContent(container, markdown)" in script.text
     assert 'renderMarkdown(byId("source-content"), chunk.text)' in script.text
     assert 'renderMarkdown(byId("report-content"), report.report)' in script.text
 

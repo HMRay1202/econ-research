@@ -103,6 +103,25 @@ function renderMarkdown(container, markdown) {
     throwOnError: false,
     trust: false,
   });
+  replaceMathErrors(container);
+}
+
+function replaceMathErrors(container) {
+  for (const error of container.querySelectorAll(".katex-error")) {
+    const fallback = node("div", "formula-fallback");
+    const notice = node("small", "muted", "公式无法安全渲染；请核对原始 PDF。显示未验证 LaTeX：");
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.className = "language-latex";
+    code.textContent = error.textContent || "[LaTeX rendering failed]";
+    pre.append(code);
+    fallback.append(notice, pre);
+    error.replaceWith(fallback);
+  }
+}
+
+function renderCardContent(container, markdown) {
+  renderMarkdown(container, markdown);
 }
 
 async function api(path, options = {}) {
@@ -363,7 +382,9 @@ function renderCards() {
     const article = node("article", "research-card");
     const top = node("div", "card-topline");
     top.append(node("span", "badge", card.type), node("span", "claim", card.claim_kind));
-    article.append(top, node("h4", "", card.title), node("p", "", card.content));
+    const content = node("div", "card-content");
+    renderCardContent(content, card.content);
+    article.append(top, node("h4", "", card.title), content);
     const tags = node("div", "tags");
     for (const tag of card.tags || []) tags.append(node("span", "tag", `#${tag}`));
     article.append(tags);

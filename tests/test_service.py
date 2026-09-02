@@ -4,7 +4,12 @@ import pytest
 
 from econ_research.db.repository import SQLiteRepository
 from econ_research.llm.telemetry import CardGenerationResult, DeepReadGenerationResult
-from econ_research.models import LLMCallMetrics, ResearchCardDraft
+from econ_research.models import (
+    FormulaAttempt,
+    FormulaExtraction,
+    LLMCallMetrics,
+    ResearchCardDraft,
+)
 from econ_research.service import ResearchService
 
 
@@ -147,6 +152,98 @@ def test_permanent_delete_removes_paper_and_managed_files(
     assert not pdf_path.exists()
     assert not markdown_path.exists()
     assert not report_path.exists()
+
+
+def test_failed_file_purge_keeps_database_record_for_retry(
+    service: ResearchService, sample_pdf: Path, monkeypatch
+) -> None:
+    paper = service.ingest(sample_pdf).paper
+    diagnostics = service.formula_diagnostics_dir / paper.id
+    diagnostics.mkdir(parents=True)
+
+    def fail_remove_tree(*args, **kwargs):
+        raise PermissionError("simulated cloud sync lock")
+
+    monkeypatch.setattr("econ_research.service.shutil.rmtree", fail_remove_tree)
+
+    with pytest.raises(PermissionError, match="cloud sync lock"):
+        service.permanently_delete_paper(paper.id)
+
+    assert service.get_paper(paper.id).id == paper.id
+    assert Path(paper.pdf_path).exists()
+
+
+@pytest.mark.parametrize("existing_cards", [True, False])
+def test_service_start_recovers_orphaned_jobs_and_card_generation(
+    service: ResearchService, sample_pdf: Path, existing_cards: bool
+) -> None:
+    paper = service.ingest(sample_pdf).paper
+    generation = service.repository.create_card_generation(paper.id)
+    if not existing_cards:
+        service.repository.replace_cards(paper.id, generation.id, [])
+    queued = service.repository.create_ingest_job("queued.pdf", str(sample_pdf))
+    running = service.repository.create_ingest_job("running.pdf", str(sample_pdf))
+    service.repository.update_ingest_job(running.id, status="running")
+
+    restarted = ResearchService(
+        repository=service.repository,
+        parser=service.parser,
+        llm=service.llm,
+        originals_dir=service.originals_dir,
+        parsed_dir=service.parsed_dir,
+        generated_dir=service.generated_dir,
+    )
+
+    recovered_generation = restarted.list_card_generations(paper.id)[0]
+    assert recovered_generation.id == generation.id
+    assert recovered_generation.status == "failed"
+    assert restarted.get_paper(paper.id).card_status == ("ready" if existing_cards else "failed")
+    assert restarted.get_ingest_job(queued.id).status == "interrupted"
+    assert restarted.get_ingest_job(running.id).status == "interrupted"
+
+
+def test_formula_attempts_and_failed_crop_are_preserved_and_purged(
+    service: ResearchService, sample_pdf: Path
+) -> None:
+    original_parser = service.parser
+
+    class FormulaParser:
+        def parse(self, pdf_path: Path, on_progress=None):
+            document = original_parser.parse(pdf_path, on_progress=on_progress)
+            crop_dir = pdf_path.parent.parent / "diagnostics" / "formulas" / pdf_path.stem
+            crop_dir.mkdir(parents=True)
+            (crop_dir / "formula-0.png").write_bytes(b"crop")
+            attempt = FormulaAttempt(
+                formula_ordinal=0,
+                page_no=2,
+                crop_name="standard",
+                scale=2.0,
+                padding=8,
+                raw_output=r"\frac{x{",
+                validation_status="rejected",
+                error_code="structure",
+                error_message="formula has unbalanced braces",
+                crop_filename="formula-0.png",
+            )
+            extraction = FormulaExtraction(
+                ordinal=0,
+                page_no=2,
+                status="unvalidated",
+                raw_ocr=r"\frac{x{",
+                crop_filename="formula-0.png",
+                attempts=[attempt],
+            )
+            return document.model_copy(update={"formula_extractions": [extraction]})
+
+    service.parser = FormulaParser()
+    paper = service.ingest(sample_pdf).paper
+
+    attempts = service.list_formula_attempts(paper.id)
+    assert attempts[0].raw_output == r"\frac{x{"
+    assert service.formula_crop_path(paper.id, 0).read_bytes() == b"crop"
+
+    service.permanently_delete_paper(paper.id)
+    assert not (service.formula_diagnostics_dir / paper.id).exists()
 
 
 def test_initialize_migrates_existing_database_additively(tmp_path: Path) -> None:

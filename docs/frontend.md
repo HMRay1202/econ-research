@@ -49,7 +49,7 @@ editable checkout as well.
 - **重新解析公式** retries the non-billable parser pipeline from the preserved original PDF; users
   explicitly regenerate cards afterward if the revised text should become LLM input.
 
-Most dynamic strings are assigned through `textContent`. Deep-read reports and source chunks are
+Most dynamic strings are assigned through `textContent`. Card content, deep-read reports and source chunks are
 the deliberate exception: the shared `renderMarkdown` helper first parses local Markdown with
 Marked, removes raw HTML, sanitizes the resulting document with DOMPurify, then renders LaTeX
 delimiters with local KaTeX. It allows only document-oriented Markdown elements and safe
@@ -65,8 +65,8 @@ treat their backslashes as escapes before KaTeX sees them.
 
 ### Markdown and mathematics rendering
 
-Rendering is presentation-only and applies only to a displayed deep-read report and to the source
-chunk dialog. Card titles/content and other UI strings continue to use `textContent`. The renderer
+Rendering is presentation-only and applies to card content, displayed deep-read reports, and the
+source chunk dialog. Card titles and other ordinary UI strings continue to use `textContent`. The renderer
 accepts GitHub-flavored Markdown and recognizes `$...$`, `$$...$$`, `\\(...\\)`, and `\\[...\\]` LaTeX
 delimiters. Display equations can scroll horizontally on narrow screens rather than changing the
 stored source text.
@@ -76,6 +76,10 @@ becomes a button only when chunk `N` belongs to the paper currently loaded in th
 it opens that stored source chunk. References inside links, inline code, or code blocks remain plain
 text. This is a client-side convenience only; it neither changes deep-read Markdown nor adds a
 route or persistence contract.
+
+When KaTeX rejects an otherwise stored formula, the client replaces its error node with a sanitized
+unvalidated-LaTeX code block and a source-PDF reminder. It must never display KaTeX's raw error text
+as document content. Cards use the same safe Markdown/math path for their content.
 
 The asset versions and license notices are recorded in `web/vendor/THIRD_PARTY_NOTICES.md`. Keep
 these assets local and versioned together; do not replace them with a CDN URL or introduce a Node
@@ -112,7 +116,7 @@ remain compatible.
   retained as history; the current card set is replaced only after a successful generation.
 - Global cards can be filtered by paper, type, and claim kind, but tag normalization is deferred.
 - Search is lexical FTS5 rather than semantic search.
-- Deep reads and source chunks render safe Markdown and local KaTeX. Unvalidated formula OCR is
+- Deep reads, source chunks, and cards render safe Markdown and local KaTeX. Unvalidated formula OCR is
   displayed as fenced `latex` source code and intentionally excluded from KaTeX rendering; for a
   quotation or uncertain formula, consult the original PDF.
 - The UI has no user accounts because it is intended for loopback-only use.

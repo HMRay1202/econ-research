@@ -6,10 +6,23 @@ setopt no_bg_nice
 PROJECT_DIR="${0:A:h}"
 APP_URL="http://127.0.0.1:8000/"
 HEALTH_URL="${APP_URL}health"
-UI_VERSION="2026-08-27-markdown-math-v1"
+UI_VERSION=""
 UI_VERSION_URL="${APP_URL}api/ui-version"
+SETUP_ONLY=0
+RUNTIME_OPTIONS=()
+for argument in "$@"; do
+  case "$argument" in
+    --setup-only) SETUP_ONLY=1 ;;
+    --no-open) export ECON_RESEARCH_NO_OPEN=1 ;;
+    --without-formula) RUNTIME_OPTIONS=(--without-formula) ;;
+    --with-formula) RUNTIME_OPTIONS=() ;;
+    *) print -u2 "Unknown option: $argument"; exit 2 ;;
+  esac
+done
 
 cd "$PROJECT_DIR"
+UI_VERSION="$(awk -F '\"' '/^WEB_UI_VERSION =/ {print $2; exit}' src/econ_research/api.py)"
+[[ -n "$UI_VERSION" ]] || { print -u2 "Cannot read UI version"; exit 1; }
 
 find_conda() {
   if [[ -n "${CONDA_EXE:-}" && -x "${CONDA_EXE}" ]]; then
@@ -60,10 +73,15 @@ if ! conda_binary="$(find_conda)"; then
   exit 1
 fi
 
-if ! "$conda_binary" env list | awk '{print $1}' | grep -qx "econ-research"; then
-  print -u2 "未找到 econ-research 环境。请先执行："
-  print -u2 "  conda env create -f environment.yml"
-  exit 1
+confirm_download() {
+  local answer
+  read "answer?需要下载并安装运行库（不下载模型），是否继续？[y/N] "
+  [[ "$answer" == [yY] ]] || exit 0
+}
+
+if ! "$conda_binary" run -n econ-research python --version >/dev/null 2>&1; then
+  confirm_download
+  "$conda_binary" env create -f "$PROJECT_DIR/environment.yml"
 fi
 
 editable_install_matches_project() {
@@ -79,10 +97,14 @@ raise SystemExit(actual != expected)
 ' "$PROJECT_DIR"
 }
 
-if ! editable_install_matches_project >/dev/null 2>&1; then
-  print "检测到 econ_research 尚未安装，或仍指向项目移动前的位置；正在修复可编辑安装…"
-  "$conda_binary" run -n econ-research python -m pip install -e ".[dev,formula]"
+if ! editable_install_matches_project >/dev/null 2>&1 || ! "$conda_binary" run \
+  --no-capture-output -n econ-research python scripts/setup_runtime.py "${RUNTIME_OPTIONS[@]}"; then
+  confirm_download
+  "$conda_binary" run --no-capture-output -n econ-research python \
+    scripts/setup_runtime.py --install "${RUNTIME_OPTIONS[@]}"
 fi
+
+[[ "$SETUP_ONLY" == "1" ]] && exit 0
 
 wait_and_open() {
   local attempt

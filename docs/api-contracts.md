@@ -24,6 +24,8 @@ filesystem paths from them.
 | `GET` | `/api/papers/{paper_id}/cards` | List one paper's cards |
 | `GET` | `/api/cards` | List cards across papers |
 | `GET` | `/api/papers/{paper_id}/chunks` | List ordered source chunks |
+| `GET` | `/api/papers/{paper_id}/formula-attempts` | List bounded formula-OCR diagnostics |
+| `GET` | `/api/papers/{paper_id}/formulas/{formula_ordinal}/crop` | Read a preserved failed-formula crop |
 | `GET` | `/api/search?q=...` | Search papers, cards, and chunks |
 | `POST` | `/api/papers/{paper_id}/deep-read` | Run a billable Terra deep read |
 | `GET` | `/api/papers/{paper_id}/deep-reads` | List deep-read history |
@@ -126,6 +128,12 @@ additive `formula_detected`, `formula_recognized`, `formula_fallback`, `formula_
 `formula_error` paper fields report the last parse's formula handling; a failed or unavailable
 formula recognizer keeps the original Docling text and never fails the complete paper import.
 
+Every detected formula preserves one of: validated LaTeX, unvalidated raw OCR, Docling source
+text, or a retained crop/page marker. `GET /api/papers/{paper_id}/formula-attempts` returns bounded
+attempt output, crop strategy, validation status, and selection information. The crop route accepts
+only opaque paper identity plus a formula ordinal; it never accepts a filesystem path and returns
+`404` if no crop was retained.
+
 ## Deep-read history routes
 
 | Method | Route | Response |
@@ -155,6 +163,11 @@ parameter and no static mount for `data/`.
 - Additive response fields are allowed; avoid removing or renaming existing fields.
 - Missing paper, report, or managed file returns `404`.
 - A stored path outside its managed directory returns `409`.
+- A file lock or permission error during permanent purge returns `409` with retry guidance. The
+  paper record is retained until all managed-file cleanup succeeds; retries tolerate files already
+  removed by an earlier partial cleanup.
+  On Windows, read-only managed entries are retried after clearing only that attribute; unrelated
+  access errors remain failures. Detailed filesystem errors are logged only on the backend.
 - Invalid enum filters or limits return FastAPI validation errors (`422`).
 - LLM/provider failures from synchronous ingestion or deep read remain workflow errors (`500`) and
   are recorded in telemetry when an API attempt occurred. Queued upload failures are reported on

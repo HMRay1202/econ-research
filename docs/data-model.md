@@ -12,6 +12,11 @@
   generation attempt, including initial import and explicit regeneration or retry requests.
 - `ingest_jobs`: local queued upload task, stage, progress, source filename, optional resulting
   paper/duplicate reference, timestamps, and error.
+- `ingest_job_events`: persisted stage messages and liveness heartbeats for upload progress.
+- `paper_sources`: associated source filenames, managed PDF paths, and source identity metadata.
+- `formula_attempts`: bounded per-formula OCR output, crop strategy, validation result, selected
+  attempt, and an optional managed crop filename for failed or low-confidence extraction. This
+  preserves evidence without treating unvalidated text as executable mathematics.
 - `deep_reads`: derived paper-specific reports with an optional focus.
 - `llm_calls`: per-call operation, model, token totals, latency, status, request ID, and
   price-snapshot estimates.
@@ -22,3 +27,8 @@ never merged automatically. Foreign keys cascade only for an explicit permanent 
 library removal is a soft archive that retains managed files and history and can be restored.
 Runtime records use UTC ISO-8601 timestamps; PDFs, parsed Markdown, databases, reports, upload
 staging files, and model assets are ignored runtime data rather than version-controlled content.
+
+The pending version adds `formula_attempts` and its index with `CREATE ... IF NOT EXISTS`; it does
+not migrate paper/model directories or rewrite old stored paths. Existing papers acquire detailed
+attempt records only after a new parse. On service startup, orphaned upload/card-generation state
+is reconciled through the repository. No runtime database should be deleted to apply this update.

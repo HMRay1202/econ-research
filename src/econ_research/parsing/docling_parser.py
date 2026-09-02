@@ -57,6 +57,19 @@ class DoclingParser:
         pdf_path: Path,
         on_progress: Callable[[str, int, str], None] | None = None,
     ) -> ParsedDocument:
+        try:
+            return self._parse(pdf_path, on_progress)
+        finally:
+            if self._formula_enricher is not None:
+                close = getattr(self._formula_enricher.recognizer, "close", None)
+                if close is not None:
+                    close()
+
+    def _parse(
+        self,
+        pdf_path: Path,
+        on_progress: Callable[[str, int, str], None] | None = None,
+    ) -> ParsedDocument:
         if on_progress:
             on_progress("preparing_models", 22, "正在配置 Docling 文档模型和加速设备。")
         if on_progress:
@@ -129,6 +142,7 @@ class DoclingParser:
             formula_fallback=formula_result.fallback if formula_result else 0,
             formula_status=formula_result.status if formula_result else "disabled",
             formula_error=formula_result.error if formula_result else None,
+            formula_extractions=formula_result.extractions if formula_result else [],
         )
 
     @staticmethod
@@ -172,22 +186,20 @@ def _infer_title(markdown: str, fallback: str) -> str:
 
 
 def _formula_pipeline_options():
-    """Enable bounded, Apple-Silicon-accelerated LaTeX formula enrichment."""
-    from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+    """Enable bounded formula enrichment on CUDA, Apple Silicon, or CPU."""
+    from docling.datamodel.accelerator_options import AcceleratorOptions
     from docling.datamodel.pipeline_options import CodeFormulaVlmOptions, PdfPipelineOptions
     from docling.datamodel.vlm_engine_options import TransformersVlmEngineOptions
 
     options = PdfPipelineOptions()
-    # AutoInline defaults to CPU-oriented 8-bit loading on this machine. CodeFormulaV2 is a
-    # Transformers-only model, so explicitly use MPS/FP16 rather than allowing one difficult
-    # formula to monopolize the CPU for many minutes.
-    options.accelerator_options = AcceleratorOptions(device=AcceleratorDevice.MPS)
+    device, torch_dtype = _select_formula_accelerator()
+    options.accelerator_options = AcceleratorOptions(device=device)
     formula_options = CodeFormulaVlmOptions.from_preset(
         "codeformulav2",
         engine_options=TransformersVlmEngineOptions(
-            device=AcceleratorDevice.MPS,
+            device=device,
             load_in_8bit=False,
-            torch_dtype="float16",
+            torch_dtype=torch_dtype,
             compile_model=False,
         ),
     )
@@ -201,6 +213,21 @@ def _formula_pipeline_options():
     options.do_formula_enrichment = True
     options.document_timeout = 180
     return options
+
+
+def _select_formula_accelerator(torch_module=None):
+    """Choose a supported formula device without assuming the host operating system."""
+    from docling.datamodel.accelerator_options import AcceleratorDevice
+
+    if torch_module is None:
+        import torch as torch_module
+
+    if torch_module.cuda.is_available():
+        return AcceleratorDevice.CUDA, "float16"
+    mps = getattr(torch_module.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return AcceleratorDevice.MPS, "float16"
+    return AcceleratorDevice.CPU, "float32"
 
 
 def _default_pipeline_options():

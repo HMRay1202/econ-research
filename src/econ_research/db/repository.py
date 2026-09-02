@@ -15,6 +15,7 @@ from econ_research.models import (
     ClaimKind,
     DeepReadResult,
     DeepReadSummary,
+    FormulaAttempt,
     IngestJob,
     IngestJobEvent,
     LLMCall,
@@ -280,7 +281,41 @@ class SQLiteRepository:
                     " ".join([document.title, *document.authors, str(document.year or "")]),
                 ),
             )
+            self._replace_formula_attempts(connection, paper_id, document)
         return len(document.chunks), len(cards)
+
+    @staticmethod
+    def _replace_formula_attempts(
+        connection: sqlite3.Connection, paper_id: str, document: ParsedDocument
+    ) -> None:
+        connection.execute("DELETE FROM formula_attempts WHERE paper_id = ?", (paper_id,))
+        for extraction in document.formula_extractions:
+            for attempt in extraction.attempts:
+                connection.execute(
+                    """INSERT INTO formula_attempts
+                       (id, paper_id, formula_ordinal, page_no, crop_name, scale, padding,
+                        raw_output, normalized_output, validation_status, error_code,
+                        error_message, selected, crop_filename, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        str(uuid4()), paper_id, attempt.formula_ordinal, attempt.page_no,
+                        attempt.crop_name, attempt.scale, attempt.padding,
+                        attempt.raw_output, attempt.normalized_output, attempt.validation_status,
+                        attempt.error_code, attempt.error_message, int(attempt.selected),
+                        attempt.crop_filename, utc_now(),
+                    ),
+                )
+
+    def list_formula_attempts(self, paper_id: str) -> list[FormulaAttempt]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT formula_ordinal, page_no, crop_name, scale, padding, raw_output,
+                   normalized_output, validation_status, error_code, error_message, selected,
+                   crop_filename FROM formula_attempts WHERE paper_id = ?
+                   ORDER BY formula_ordinal, id""",
+                (paper_id,),
+            ).fetchall()
+        return [FormulaAttempt(**dict(row)) for row in rows]
 
     def create_ingest_job(self, source_filename: str, upload_path: str) -> IngestJob:
         timestamp = utc_now()
@@ -388,7 +423,7 @@ class SQLiteRepository:
                 """UPDATE ingest_jobs SET status = 'interrupted', stage = 'interrupted',
                    error = COALESCE(error, 'The local service stopped before this task completed'),
                    message = '本地服务在任务完成前停止。', completed_at = ?, updated_at = ?
-                   WHERE status = 'running'""",
+                   WHERE status IN ('queued', 'running')""",
                 (utc_now(), utc_now()),
             )
 
@@ -400,6 +435,24 @@ class SQLiteRepository:
                    error = COALESCE(error, 'The local service stopped before parsing completed'),
                    updated_at = ? WHERE status = 'processing'""",
                 (utc_now(),),
+            )
+
+    def recover_orphaned_card_generations(self) -> None:
+        """Close card generations that cannot still be running after a process restart."""
+        timestamp = utc_now()
+        error = "The local service stopped before card generation completed"
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE card_generations SET status = 'failed', error = COALESCE(error, ?),
+                   completed_at = ? WHERE status = 'running'""",
+                (error, timestamp),
+            )
+            connection.execute(
+                """UPDATE papers SET card_status = CASE
+                       WHEN EXISTS (SELECT 1 FROM cards WHERE cards.paper_id = papers.id)
+                       THEN 'ready' ELSE 'failed' END,
+                   updated_at = ? WHERE card_status = 'generating'""",
+                (timestamp,),
             )
 
     def create_card_generation(self, paper_id: str) -> CardGeneration:
@@ -626,6 +679,7 @@ class SQLiteRepository:
                     page_start, page_end) VALUES ('paper', ?, ?, ?, ?, NULL, NULL, NULL)""",
                 self._paper_search_values(connection, paper_id),
             )
+            self._replace_formula_attempts(connection, paper_id, document)
         return reconnected
 
     @staticmethod

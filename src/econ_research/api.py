@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -17,6 +18,7 @@ from econ_research.models import (
     ClaimKind,
     DeepReadResult,
     DeepReadSummary,
+    FormulaAttempt,
     IngestJob,
     IngestJobEvent,
     IngestResult,
@@ -35,7 +37,8 @@ from econ_research.service import (
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 WEB_DIR = Path(__file__).with_name("web")
-WEB_UI_VERSION = "2026-08-27-markdown-math-v1"
+WEB_UI_VERSION = "2026-08-28-formula-fallback-v1"
+logger = logging.getLogger(__name__)
 
 
 class DeepReadRequest(BaseModel):
@@ -245,6 +248,15 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except OSError as exc:
+            logger.exception("File cleanup failed while purging paper %s", paper_id)
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "无法完成文件清理；论文记录已保留。请关闭占用文件的程序，"
+                    "等待云同步完成并确认目录权限后重试删除。"
+                ),
+            ) from exc
 
     @application.get("/api/papers/{paper_id}/chunks", response_model=list[SourceChunk])
     def paper_chunks(request: Request, paper_id: str) -> list[SourceChunk]:
@@ -252,6 +264,23 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             return get_service(request).list_chunks(paper_id)
         except PaperNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/formula-attempts", response_model=list[FormulaAttempt])
+    def paper_formula_attempts(request: Request, paper_id: str) -> list[FormulaAttempt]:
+        try:
+            return get_service(request).list_formula_attempts(paper_id)
+        except PaperNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.get("/api/papers/{paper_id}/formulas/{formula_ordinal}/crop")
+    def formula_crop(request: Request, paper_id: str, formula_ordinal: int) -> FileResponse:
+        try:
+            path = get_service(request).formula_crop_path(paper_id, formula_ordinal)
+            return FileResponse(path, media_type="image/png", filename=path.name)
+        except (PaperNotFoundError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @application.get("/api/papers/{paper_id}/deep-reads", response_model=list[DeepReadSummary])
     def paper_deep_reads(request: Request, paper_id: str) -> list[DeepReadSummary]:

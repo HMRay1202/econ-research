@@ -29,8 +29,15 @@ dev = [
 ]
 formula = [
   "ftfy>=6.1,<7",
-  "paddleocr>=3.0,<4",
+  "paddleocr[doc-parser]>=3.0,<4",
   "paddlepaddle>=3.0,<4",
+]
+formula-gpu = [
+  "ftfy>=6.1,<7",
+  "paddleocr[doc-parser]>=3.0,<4",
+  "paddlepaddle-gpu==3.3.1; sys_platform == 'win32'",
+  "paddlepaddle-gpu>=3.3,<4; sys_platform != 'darwin' and sys_platform != 'win32'",
+  "paddlepaddle>=3.0,<4; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

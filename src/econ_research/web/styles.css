@@ -149,6 +149,8 @@ button:disabled { cursor: wait; opacity: .55; }
 .claim { color: var(--muted); font-size: .72rem; }
 .research-card h4 { margin: .8rem 0 .5rem; font-family: Georgia, serif; font-size: 1.1rem; }
 .research-card p { line-height: 1.55; font-size: .9rem; }
+.card-content { font-size: .9rem; line-height: 1.55; }
+.card-content > :last-child { margin-bottom: 0; }
 .provenance { padding-top: .65rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .76rem; }
 .tags { display: flex; flex-wrap: wrap; gap: .3rem; margin: .6rem 0; }
 .tag { color: #55615b; font-size: .7rem; }
@@ -180,6 +182,8 @@ button:disabled { cursor: wait; opacity: .55; }
 .markdown-content th { background: var(--green-soft); }
 .markdown-content a { color: var(--green); }
 .markdown-content .katex-display { max-width: 100%; padding: .5rem 0; overflow-x: auto; overflow-y: hidden; }
+.formula-fallback { margin: .75rem 0; padding: .7rem; border-left: 3px solid #c58a39; background: #fff7e9; }
+.formula-fallback pre { margin: .5rem 0 0; padding: .65rem; overflow: auto; border-radius: .35rem; background: #f5ead7; }
 .chunk-reference { min-height: auto; padding: .05rem .25rem; color: var(--green); border-radius: .25rem; background: var(--green-soft); font-size: inherit; font-weight: 700; vertical-align: baseline; }
 
 .usage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .7rem; }

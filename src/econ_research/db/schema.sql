@@ -91,6 +91,24 @@ CREATE TABLE IF NOT EXISTS ingest_job_events (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS formula_attempts (
+    id TEXT PRIMARY KEY,
+    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    formula_ordinal INTEGER NOT NULL,
+    page_no INTEGER NOT NULL,
+    crop_name TEXT NOT NULL,
+    scale REAL NOT NULL,
+    padding INTEGER NOT NULL,
+    raw_output TEXT,
+    normalized_output TEXT,
+    validation_status TEXT NOT NULL,
+    error_code TEXT,
+    error_message TEXT,
+    selected INTEGER NOT NULL DEFAULT 0,
+    crop_filename TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS card_generations (
     id TEXT PRIMARY KEY,
     paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
@@ -144,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_ingest_jobs_created ON ingest_jobs(created_at);
 CREATE INDEX IF NOT EXISTS idx_ingest_job_events_job_created
     ON ingest_job_events(job_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_card_generations_paper ON card_generations(paper_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_formula_attempts_paper ON formula_attempts(paper_id, formula_ordinal);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     entity_type UNINDEXED,
